@@ -5,6 +5,8 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // ============================================================================
@@ -312,6 +314,23 @@ func (s *AgentSpec) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
 }
 
+// ToYAML serializes AgentSpec to a YAML string.
+func (s *AgentSpec) ToYAML() (string, error) {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+
+	var value interface{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return "", err
+	}
+
+	var builder strings.Builder
+	writeYAMLValue(&builder, value, 0)
+	return builder.String(), nil
+}
+
 // FromJSON deserializes AgentSpec from JSON.
 func (s *AgentSpec) FromJSON(data []byte) error {
 	return json.Unmarshal(data, s)
@@ -348,4 +367,75 @@ func NewAgentSpec(name, version string) *AgentSpec {
 			EncryptionRequired: false,
 		},
 	}
+}
+
+func writeYAMLValue(builder *strings.Builder, value interface{}, indent int) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			writeIndent(builder, indent)
+			builder.WriteString(key)
+			if isScalarYAMLValue(v[key]) {
+				builder.WriteString(": ")
+				builder.WriteString(formatYAMLScalar(v[key]))
+				builder.WriteByte('\n')
+				continue
+			}
+			builder.WriteString(":\n")
+			writeYAMLValue(builder, v[key], indent+2)
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			writeIndent(builder, indent)
+			builder.WriteString("[]\n")
+			return
+		}
+		for _, item := range v {
+			writeIndent(builder, indent)
+			builder.WriteString("-")
+			if isScalarYAMLValue(item) {
+				builder.WriteByte(' ')
+				builder.WriteString(formatYAMLScalar(item))
+				builder.WriteByte('\n')
+				continue
+			}
+			builder.WriteByte('\n')
+			writeYAMLValue(builder, item, indent+2)
+		}
+	default:
+		writeIndent(builder, indent)
+		builder.WriteString(formatYAMLScalar(v))
+		builder.WriteByte('\n')
+	}
+}
+
+func writeIndent(builder *strings.Builder, indent int) {
+	for i := 0; i < indent; i++ {
+		builder.WriteByte(' ')
+	}
+}
+
+func isScalarYAMLValue(value interface{}) bool {
+	switch value.(type) {
+	case map[string]interface{}, []interface{}:
+		return false
+	default:
+		return true
+	}
+}
+
+func formatYAMLScalar(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(data)
 }
