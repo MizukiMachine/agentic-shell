@@ -1,0 +1,61 @@
+# Go用 .gitignore
+
+# バイナリファイル
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# テスト関連
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go ワークスペース
+/go.work
+/go.work.sum
+
+# 依存管理
+vendor/
+
+# ビルドキャッシュ
+.cache/
+
+# IDE・エディタ
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 環境変数・設定ファイル
+.env
+.env.*
+*.local
+config.local.yaml
+config.local.yml
+
+# ログファイル
+*.log
+logs/
+
+# デバッグ
+debug
+__debug_bin*
+
+# プロファイリング
+*.pprof
+*.prof
+
+# 一時ファイル
+tmp/
+temp/
+*.tmp
+
+# ドキュメント生成
+site/
+public/
