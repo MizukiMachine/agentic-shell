@@ -59,3 +59,6 @@ temp/
 # ドキュメント生成
 site/
 public/
+
+# ダイアグラム
+/docs/diagrams/
