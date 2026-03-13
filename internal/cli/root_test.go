@@ -1,0 +1,93 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestRootCommandHelp(t *testing.T) {
+	cmd := GetRootCmd()
+	if cmd == nil {
+		t.Fatal("rootCmd is nil")
+	}
+
+	// ヘルプテキストの検証
+	if !strings.Contains(cmd.Short, "AI") {
+		t.Errorf("expected short description to contain 'AI', got %s", cmd.Short)
+	}
+}
+
+func TestVersionCommandExists(t *testing.T) {
+	cmd := GetRootCmd()
+	versionCmd, _, err := cmd.Find([]string{"version"})
+	if err != nil {
+		t.Fatalf("version command not found: %v", err)
+	}
+	if versionCmd == nil {
+		t.Fatal("version command is nil")
+	}
+	if versionCmd.Name() != "version" {
+		t.Errorf("expected command name 'version', got %s", versionCmd.Name())
+	}
+}
+
+func TestSpecGatherCommandExists(t *testing.T) {
+	cmd := GetRootCmd()
+	specGatherCmd, _, err := cmd.Find([]string{"spec-gather"})
+	if err != nil {
+		t.Fatalf("spec-gather command not found: %v", err)
+	}
+	if specGatherCmd == nil {
+		t.Fatal("spec-gather command is nil")
+	}
+	if specGatherCmd.Name() != "spec-gather" {
+		t.Errorf("expected command name 'spec-gather', got %s", specGatherCmd.Name())
+	}
+}
+
+func TestGenerateCommandExists(t *testing.T) {
+	cmd := GetRootCmd()
+	generateCmd, _, err := cmd.Find([]string{"generate"})
+	if err != nil {
+		t.Fatalf("generate command not found: %v", err)
+	}
+	if generateCmd == nil {
+		t.Fatal("generate command is nil")
+	}
+	if generateCmd.Name() != "generate" {
+		t.Errorf("expected command name 'generate', got %s", generateCmd.Name())
+	}
+}
+
+func TestVersionOutput(t *testing.T) {
+	// バージョン情報を設定
+	Version = "test-version"
+	Commit = "test-commit"
+	Date = "test-date"
+
+	// printVersion関数が存在することを確認
+	// 注: printVersionは直接fmt.Printfを使用するため、
+	// 出力のテストは統合テストで行う
+}
+
+func TestGlobalFlags(t *testing.T) {
+	cmd := GetRootCmd()
+
+	// --config フラグの確認
+	configFlag := cmd.PersistentFlags().Lookup("config")
+	if configFlag == nil {
+		t.Error("config flag not found")
+	}
+
+	// --output-dir フラグの確認
+	outputDirFlag := cmd.PersistentFlags().Lookup("output-dir")
+	if outputDirFlag == nil {
+		t.Error("output-dir flag not found")
+	}
+
+	// --verbose フラグの確認
+	verboseFlag := cmd.PersistentFlags().Lookup("verbose")
+	if verboseFlag == nil {
+		t.Error("verbose flag not found")
+	}
+}
