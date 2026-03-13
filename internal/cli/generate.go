@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/MizukiMachine/agentic-shell/internal/agent"
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/MizukiMachine/agentic-shell/pkg/types"
 	"github.com/spf13/cobra"
@@ -109,12 +111,20 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// AgentSpecからClaudeAgentDefinitionに変換
-	claudeDef := agentSpec.ToClaudeAgentDefinition()
+	generator := agent.NewGenerator()
+	claudeDef, err := generator.Generate(ctx, agentSpec)
+	if err != nil {
+		return fmt.Errorf("エージェント定義生成エラー: %w", err)
+	}
+
+	markdown, err := generator.RenderMarkdown(claudeDef)
+	if err != nil {
+		return fmt.Errorf("Markdownレンダリングエラー: %w", err)
+	}
 
 	// エージェント定義ファイルを生成
-	outputPath := filepath.Join(outputDir, "agent-definition.yaml")
-	if err := writeClaudeAgentDefinition(claudeDef, outputPath); err != nil {
+	outputPath := buildAgentOutputPath(outputDir, claudeDef.Metadata.Name)
+	if err := writeClaudeAgentMarkdown(markdown, outputPath); err != nil {
 		return fmt.Errorf("エージェント定義出力エラー: %w", err)
 	}
 
@@ -152,8 +162,8 @@ func loadSpecFromFile(path string) (*spec.AgentSpec, error) {
 	return agentSpec, nil
 }
 
-// writeClaudeAgentDefinition はClaudeAgentDefinitionをYAMLファイルとして書き込みます
-func writeClaudeAgentDefinition(def *types.ClaudeAgentDefinition, path string) error {
+// writeClaudeAgentMarkdown はClaude Code互換のMarkdownファイルを書き込みます
+func writeClaudeAgentMarkdown(markdown, path string) error {
 	// 親ディレクトリを作成
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
@@ -162,10 +172,19 @@ func writeClaudeAgentDefinition(def *types.ClaudeAgentDefinition, path string) e
 		}
 	}
 
-	data, err := yaml.Marshal(def)
-	if err != nil {
-		return err
-	}
+	return os.WriteFile(path, []byte(markdown), 0644)
+}
 
-	return os.WriteFile(path, data, 0644)
+func buildAgentOutputPath(outputDir, name string) string {
+	filename := agent.MarkdownFileName(name) + ".md"
+	cleanDir := filepath.Clean(outputDir)
+	if endsWithClaudeAgents(cleanDir) {
+		return filepath.Join(cleanDir, filename)
+	}
+	return filepath.Join(cleanDir, ".claude", "agents", filename)
+}
+
+func endsWithClaudeAgents(path string) bool {
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	return strings.HasSuffix(normalized, "/.claude/agents") || normalized == ".claude/agents"
 }
