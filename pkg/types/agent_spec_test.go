@@ -3,7 +3,10 @@
 package types
 
 import (
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAgentSpecMetadataValidation(t *testing.T) {
@@ -315,6 +318,77 @@ func TestAgentSpecJSONRoundTrip(t *testing.T) {
 	}
 	if decoded.Communication.Type != spec.Communication.Type {
 		t.Errorf("communication type mismatch")
+	}
+}
+
+func TestAgentSpecToYAML(t *testing.T) {
+	spec := NewAgentSpec("yaml-test-agent", "1.0.0")
+	spec.Metadata.Description = "YAML serialization test"
+	spec.Intent = IntentSpace{
+		Metadata: IntentMetadata{
+			IntentID:   "intent-yaml",
+			Source:     IntentSourceUser,
+			Confidence: 0.9,
+			Version:    1,
+		},
+		Goals: GoalsDimension{
+			Primary: PrimaryGoals{
+				Main: Goal{
+					ID:          "goal-yaml",
+					Type:        GoalTypePrimary,
+					Description: "Serialize to YAML",
+					Priority:    GoalPriorityHigh,
+					Measurable:  true,
+				},
+			},
+		},
+		Preferences: PreferencesDimension{
+			QualityVsSpeed: QualitySpeedPreference{
+				SpeedMultiplier: 1.0,
+			},
+			CostVsPerformance: CostPerformancePreference{
+				Elasticity: 1.0,
+			},
+		},
+		Objectives: ObjectivesDimension{
+			Functional: []FunctionalRequirement{
+				{
+					ID:          "fr-yaml",
+					Description: "Support YAML output",
+					Priority:    GoalPriorityHigh,
+					Testable:    true,
+				},
+			},
+		},
+		Modality: ModalityDimension{
+			Primary: OutputModalityData,
+			Data: &DataModality{
+				Format:     DataFormatYAML,
+				Validation: true,
+			},
+		},
+	}
+
+	yamlText, err := spec.ToYAML()
+	if err != nil {
+		t.Fatalf("ToYAML returned error: %v", err)
+	}
+	if yamlText == "" {
+		t.Fatal("expected YAML output to be non-empty")
+	}
+	if !strings.Contains(yamlText, "metadata:") || !strings.Contains(yamlText, "name: yaml-test-agent") {
+		t.Fatalf("unexpected YAML output: %s", yamlText)
+	}
+
+	var decoded AgentSpec
+	if err := yaml.Unmarshal([]byte(yamlText), &decoded); err != nil {
+		t.Fatalf("generated YAML should be parseable: %v", err)
+	}
+	if decoded.Metadata.Name != spec.Metadata.Name {
+		t.Fatalf("name mismatch after YAML round trip: got %q, want %q", decoded.Metadata.Name, spec.Metadata.Name)
+	}
+	if decoded.Intent.Goals.Primary.Main.Description != spec.Intent.Goals.Primary.Main.Description {
+		t.Fatalf("goal description mismatch after YAML round trip: got %q, want %q", decoded.Intent.Goals.Primary.Main.Description, spec.Intent.Goals.Primary.Main.Description)
 	}
 }
 

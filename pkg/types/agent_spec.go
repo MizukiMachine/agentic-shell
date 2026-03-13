@@ -5,6 +5,10 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ============================================================================
@@ -307,17 +311,40 @@ func (s *AgentSpec) Validate() error {
 	return nil
 }
 
-// ToJSON serializes AgentSpec to JSON.
+// ToJSON は AgentSpec を JSON にシリアライズします。
 func (s *AgentSpec) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
 }
 
-// FromJSON deserializes AgentSpec from JSON.
+// ToYAML は AgentSpec を YAML 文字列にシリアライズします。
+func (s *AgentSpec) ToYAML() (string, error) {
+	data, err := yaml.Marshal(s)
+	if err == nil {
+		return string(data), nil
+	}
+
+	// yaml ライブラリで失敗した場合のみ、既存の手書き実装にフォールバックする。
+	data, err = json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+
+	var value interface{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return "", err
+	}
+
+	var builder strings.Builder
+	writeYAMLValue(&builder, value, 0)
+	return builder.String(), nil
+}
+
+// FromJSON は JSON から AgentSpec を復元します。
 func (s *AgentSpec) FromJSON(data []byte) error {
 	return json.Unmarshal(data, s)
 }
 
-// NewAgentSpec creates a new AgentSpec with default values.
+// NewAgentSpec はデフォルト値を持つ AgentSpec を生成します。
 func NewAgentSpec(name, version string) *AgentSpec {
 	return &AgentSpec{
 		Metadata: AgentSpecMetadata{
@@ -348,4 +375,135 @@ func NewAgentSpec(name, version string) *AgentSpec {
 			EncryptionRequired: false,
 		},
 	}
+}
+
+func writeYAMLValue(builder *strings.Builder, value interface{}, indent int) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			writeIndent(builder, indent)
+			builder.WriteString(key)
+			if isScalarYAMLValue(v[key]) {
+				builder.WriteString(": ")
+				builder.WriteString(formatYAMLScalar(v[key]))
+				builder.WriteByte('\n')
+				continue
+			}
+			builder.WriteString(":\n")
+			writeYAMLValue(builder, v[key], indent+2)
+		}
+	case []interface{}:
+		if len(v) == 0 {
+			writeIndent(builder, indent)
+			builder.WriteString("[]\n")
+			return
+		}
+		for _, item := range v {
+			writeIndent(builder, indent)
+			builder.WriteString("-")
+			if isScalarYAMLValue(item) {
+				builder.WriteByte(' ')
+				builder.WriteString(formatYAMLScalar(item))
+				builder.WriteByte('\n')
+				continue
+			}
+			builder.WriteByte('\n')
+			writeYAMLValue(builder, item, indent+2)
+		}
+	default:
+		writeIndent(builder, indent)
+		builder.WriteString(formatYAMLScalar(v))
+		builder.WriteByte('\n')
+	}
+}
+
+func writeIndent(builder *strings.Builder, indent int) {
+	for i := 0; i < indent; i++ {
+		builder.WriteByte(' ')
+	}
+}
+
+func isScalarYAMLValue(value interface{}) bool {
+	switch value.(type) {
+	case map[string]interface{}, []interface{}:
+		return false
+	default:
+		return true
+	}
+}
+
+func formatYAMLScalar(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(data)
+}
+
+// ToClaudeAgentDefinition converts AgentSpec to ClaudeAgentDefinition.
+// This bridges the intermediate specification format to the final agent definition.
+func (s *AgentSpec) ToClaudeAgentDefinition() *ClaudeAgentDefinition {
+	def := NewClaudeAgentDefinition(s.Metadata.Name, s.Metadata.Description)
+
+	// Transfer metadata
+	def.Metadata.Version = s.Metadata.Version
+	def.Metadata.Tags = s.Metadata.Tags
+	def.Metadata.SourceIntentID = s.Intent.Metadata.IntentID
+
+	// Build system prompt from goals and objectives
+	var promptParts []string
+	if s.Intent.Goals.Primary.Main.Description != "" {
+		promptParts = append(promptParts, fmt.Sprintf("Primary Goal: %s", s.Intent.Goals.Primary.Main.Description))
+	}
+	for _, criteria := range s.Intent.Goals.Primary.Main.SuccessCriteria {
+		promptParts = append(promptParts, fmt.Sprintf("- Success Criteria: %s", criteria))
+	}
+	for _, fr := range s.Intent.Objectives.Functional {
+		promptParts = append(promptParts, fmt.Sprintf("- Functional Requirement: %s", fr.Description))
+	}
+	if def.Prompt.SystemPrompt == "" {
+		def.Prompt.SystemPrompt = s.Metadata.Description
+	}
+
+	// Transfer preferences
+	def.Prompt.Traits = make(map[string]string)
+	if s.Intent.Preferences.QualityVsSpeed.Bias != "" {
+		def.Prompt.Traits["quality_bias"] = string(s.Intent.Preferences.QualityVsSpeed.Bias)
+	}
+
+	// Convert tools
+	def.Tools = make([]ToolDefinition, 0, len(s.Tools))
+	for _, t := range s.Tools {
+		def.Tools = append(def.Tools, ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		})
+	}
+
+	// Configure output based on modality
+	if s.Intent.Modality.Primary != "" {
+		def.Output.Format = string(s.Intent.Modality.Primary)
+	}
+	if s.Intent.Modality.Text != nil {
+		def.Output.Language = s.Intent.Modality.Text.Language
+		def.Output.Tone = string(s.Intent.Modality.Text.Tone)
+	}
+
+	// Set timestamps
+	def.Metadata.CreatedAt = s.Intent.Metadata.CreatedAt
+	def.Metadata.UpdatedAt = s.Intent.Metadata.CreatedAt
+
+	return def
 }
