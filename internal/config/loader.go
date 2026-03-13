@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -25,6 +26,7 @@ type Loader struct {
 	configType string
 	configPath string
 	envPrefix  string
+	usedFile   string
 }
 
 // NewLoader は新しい Loader を作成します
@@ -91,23 +93,23 @@ func (l *Loader) Load() (*Config, error) {
 	// 環境変数の設定
 	v.SetEnvPrefix(l.envPrefix)
 	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	bindEnvKeys(v)
 
-	// 設定ファイルを読み込み（存在しなくてもエラーにしない）
+	// 設定ファイルを読み込み
 	if err := v.ReadInConfig(); err != nil {
+		if l.configPath != "" {
+			return nil, fmt.Errorf("failed to read config file %q: %w", l.configPath, err)
+		}
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
-		// 設定ファイルが見つからない場合はデフォルト設定を使用
-	}
-
-	// 読み込んだ設定を構造体にマップ
-	var fileConfig Config
-	if err := v.Unmarshal(&fileConfig); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	} else {
+		l.usedFile = v.ConfigFileUsed()
 	}
 
 	// デフォルト設定とマージ
-	config.Merge(&fileConfig)
+	config.Merge(loadOverrides(v))
 
 	// 検証
 	if err := config.Validate(); err != nil {
@@ -115,6 +117,11 @@ func (l *Loader) Load() (*Config, error) {
 	}
 
 	return config, nil
+}
+
+// ConfigFileUsed は読み込まれた設定ファイルパスを返します。
+func (l *Loader) ConfigFileUsed() string {
+	return l.usedFile
 }
 
 // LoadFromFile は指定されたファイルから設定を読み込みます
@@ -191,4 +198,68 @@ func ConfigExists() (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func bindEnvKeys(v *viper.Viper) {
+	for _, key := range []string{
+		"llm.claude_path",
+		"llm.timeout",
+		"llm.max_retries",
+		"output.directory",
+		"output.format",
+		"output.overwrite",
+		"gathering.confidence_threshold",
+		"gathering.max_question_rounds",
+		"generation.default_model",
+		"generation.default_temperature",
+	} {
+		_ = v.BindEnv(key)
+	}
+}
+
+func loadOverrides(v *viper.Viper) *ConfigOverrides {
+	overrides := &ConfigOverrides{}
+
+	if v.IsSet("llm.claude_path") {
+		value := v.GetString("llm.claude_path")
+		overrides.LLM.ClaudePath = &value
+	}
+	if v.IsSet("llm.timeout") {
+		value := v.GetString("llm.timeout")
+		overrides.LLM.Timeout = &value
+	}
+	if v.IsSet("llm.max_retries") {
+		value := v.GetInt("llm.max_retries")
+		overrides.LLM.MaxRetries = &value
+	}
+	if v.IsSet("output.directory") {
+		value := v.GetString("output.directory")
+		overrides.Output.Directory = &value
+	}
+	if v.IsSet("output.format") {
+		value := v.GetString("output.format")
+		overrides.Output.Format = &value
+	}
+	if v.IsSet("output.overwrite") {
+		value := v.GetBool("output.overwrite")
+		overrides.Output.Overwrite = &value
+	}
+	if v.IsSet("gathering.confidence_threshold") {
+		value := v.GetFloat64("gathering.confidence_threshold")
+		overrides.Gathering.ConfidenceThreshold = &value
+	}
+	if v.IsSet("gathering.max_question_rounds") {
+		value := v.GetInt("gathering.max_question_rounds")
+		overrides.Gathering.MaxQuestionRounds = &value
+	}
+	if v.IsSet("generation.default_model") {
+		value := v.GetString("generation.default_model")
+		overrides.Generation.DefaultModel = &value
+	}
+	if v.IsSet("generation.default_temperature") {
+		value := v.GetFloat64("generation.default_temperature")
+		overrides.Generation.DefaultTemperature = &value
+	}
+
+	return overrides
 }

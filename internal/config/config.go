@@ -9,10 +9,45 @@ import (
 
 // Config は agentic-shell のメイン設定構造体です
 type Config struct {
-	LLM        LLMConfig       `mapstructure:"llm" yaml:"llm"`
-	Output     OutputConfig    `mapstructure:"output" yaml:"output"`
-	Gathering  GatheringConfig `mapstructure:"gathering" yaml:"gathering"`
+	LLM        LLMConfig        `mapstructure:"llm" yaml:"llm"`
+	Output     OutputConfig     `mapstructure:"output" yaml:"output"`
+	Gathering  GatheringConfig  `mapstructure:"gathering" yaml:"gathering"`
 	Generation GenerationConfig `mapstructure:"generation" yaml:"generation"`
+}
+
+// ConfigOverrides は設定の上書き値を表します。
+// nil は「未設定」、ポインタ値はゼロ値を含めて「明示設定」を表します。
+type ConfigOverrides struct {
+	LLM        LLMConfigOverrides        `mapstructure:"llm" yaml:"llm"`
+	Output     OutputConfigOverrides     `mapstructure:"output" yaml:"output"`
+	Gathering  GatheringConfigOverrides  `mapstructure:"gathering" yaml:"gathering"`
+	Generation GenerationConfigOverrides `mapstructure:"generation" yaml:"generation"`
+}
+
+// LLMConfigOverrides は LLM 設定の上書き値です。
+type LLMConfigOverrides struct {
+	ClaudePath *string `mapstructure:"claude_path" yaml:"claude_path"`
+	Timeout    *string `mapstructure:"timeout" yaml:"timeout"`
+	MaxRetries *int    `mapstructure:"max_retries" yaml:"max_retries"`
+}
+
+// OutputConfigOverrides は出力設定の上書き値です。
+type OutputConfigOverrides struct {
+	Directory *string `mapstructure:"directory" yaml:"directory"`
+	Format    *string `mapstructure:"format" yaml:"format"`
+	Overwrite *bool   `mapstructure:"overwrite" yaml:"overwrite"`
+}
+
+// GatheringConfigOverrides は情報収集設定の上書き値です。
+type GatheringConfigOverrides struct {
+	ConfidenceThreshold *float64 `mapstructure:"confidence_threshold" yaml:"confidence_threshold"`
+	MaxQuestionRounds   *int     `mapstructure:"max_question_rounds" yaml:"max_question_rounds"`
+}
+
+// GenerationConfigOverrides は生成設定の上書き値です。
+type GenerationConfigOverrides struct {
+	DefaultModel       *string  `mapstructure:"default_model" yaml:"default_model"`
+	DefaultTemperature *float64 `mapstructure:"default_temperature" yaml:"default_temperature"`
 }
 
 // LLMConfig は LLM 関連の設定です
@@ -151,36 +186,40 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Merge は他の設定をこの設定にマージします
-// 値が空の場合はデフォルト値を維持します
-func (c *Config) Merge(other *Config) {
-	if other.LLM.ClaudePath != "" {
-		c.LLM.ClaudePath = other.LLM.ClaudePath
+// Merge は上書き設定をこの設定にマージします。
+func (c *Config) Merge(other *ConfigOverrides) {
+	if other == nil {
+		return
 	}
-	if other.LLM.Timeout != "" {
-		c.LLM.Timeout = other.LLM.Timeout
-	}
-	if other.LLM.MaxRetries > 0 {
-		c.LLM.MaxRetries = other.LLM.MaxRetries
-	}
-	if other.Output.Directory != "" {
-		c.Output.Directory = other.Output.Directory
-	}
-	if other.Output.Format != "" {
-		c.Output.Format = other.Output.Format
-	}
-	c.Output.Overwrite = other.Output.Overwrite
 
-	if other.Gathering.ConfidenceThreshold > 0 {
-		c.Gathering.ConfidenceThreshold = other.Gathering.ConfidenceThreshold
+	if other.LLM.ClaudePath != nil {
+		c.LLM.ClaudePath = *other.LLM.ClaudePath
 	}
-	if other.Gathering.MaxQuestionRounds > 0 {
-		c.Gathering.MaxQuestionRounds = other.Gathering.MaxQuestionRounds
+	if other.LLM.Timeout != nil {
+		c.LLM.Timeout = *other.LLM.Timeout
 	}
-	if other.Generation.DefaultModel != "" {
-		c.Generation.DefaultModel = other.Generation.DefaultModel
+	if other.LLM.MaxRetries != nil {
+		c.LLM.MaxRetries = *other.LLM.MaxRetries
 	}
-	if other.Generation.DefaultTemperature > 0 {
-		c.Generation.DefaultTemperature = other.Generation.DefaultTemperature
+	if other.Output.Directory != nil {
+		c.Output.Directory = *other.Output.Directory
+	}
+	if other.Output.Format != nil {
+		c.Output.Format = *other.Output.Format
+	}
+	if other.Output.Overwrite != nil {
+		c.Output.Overwrite = *other.Output.Overwrite
+	}
+	if other.Gathering.ConfidenceThreshold != nil {
+		c.Gathering.ConfidenceThreshold = *other.Gathering.ConfidenceThreshold
+	}
+	if other.Gathering.MaxQuestionRounds != nil {
+		c.Gathering.MaxQuestionRounds = *other.Gathering.MaxQuestionRounds
+	}
+	if other.Generation.DefaultModel != nil {
+		c.Generation.DefaultModel = *other.Generation.DefaultModel
+	}
+	if other.Generation.DefaultTemperature != nil {
+		c.Generation.DefaultTemperature = *other.Generation.DefaultTemperature
 	}
 }
