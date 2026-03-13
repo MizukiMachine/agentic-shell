@@ -10,15 +10,16 @@ import (
 
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
 
 // specGatherCmd のフラグ変数
 var (
-	specOutput string
-	specQuick  bool
+	specOutput  string
+	specQuick   bool
 	specTimeout int
-	specFormat string
+	specFormat  string
 )
 
 // specGatherCmd はインタラクティブにAgentSpecを収集するコマンドです
@@ -37,7 +38,7 @@ var specGatherCmd = &cobra.Command{
   # 出力ファイルを指定
   agentic-shell spec-gather --output spec.yaml "テスト自動化"
 
-  # クイックモード（最小限の質問）
+  # クイックモード（最小限の質問で収束、低信頼度でも継続）
   agentic-shell spec-gather --quick "ドキュメント生成"
 
   # JSON形式で出力
@@ -51,13 +52,17 @@ func init() {
 
 	// フラグ設定
 	specGatherCmd.Flags().StringVar(&specOutput, "output", "", "出力ファイルパス (指定しない場合は標準出力)")
-	specGatherCmd.Flags().BoolVarP(&specQuick, "quick", "q", false, "クイックモード（最小限の質問で収束）")
+	specGatherCmd.Flags().BoolVarP(&specQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
 	specGatherCmd.Flags().IntVarP(&specTimeout, "timeout", "t", 300, "タイムアウト（秒）")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
 func runSpecGather(cmd *cobra.Command, args []string) error {
+	// Viperから設定値を取得（設定ファイル・環境変数を反映）
+	outputDir := viper.GetString("output-dir")
+	verbose := viper.GetBool("verbose")
+
 	input := args[0]
 
 	// コンテキストにタイムアウトを設定
@@ -70,19 +75,30 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	if verbose {
 		fmt.Fprintf(os.Stderr, "入力: %s\n", input)
 		fmt.Fprintf(os.Stderr, "タイムアウト: %d秒\n", specTimeout)
+		if specQuick {
+			fmt.Fprintf(os.Stderr, "クイックモード: 有効\n")
+		}
 	}
 
 	// インタラクティブ収集を実行
 	agentSpec, err := gatherer.GatherInteractive(ctx, input)
+
+	// エラーハンドリング（クイックモード対応）
 	if err != nil {
-		return fmt.Errorf("仕様収集エラー: %w", err)
+		// クイックモードで、かつ部分結果がある場合は継続
+		if specQuick && agentSpec != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "クイックモード: エラーあり but 部分結果を使用: %v\n", err)
+			}
+		} else {
+			return fmt.Errorf("仕様収集エラー: %w", err)
+		}
 	}
 
-	// クイックモードの場合、信頼度が低くても許可
+	// クイックモードの場合、低信頼度でも警告のみ
 	if specQuick && agentSpec.Intent.Metadata.Confidence < spec.ConfidenceThreshold {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "クイックモード: 信頼度 %.2f で継続\n", agentSpec.Intent.Metadata.Confidence)
-		}
+		fmt.Fprintf(os.Stderr, "⚠️ クイックモード: 信頼度 %.2f は閾値 %.2f 未満です\n",
+			agentSpec.Intent.Metadata.Confidence, spec.ConfidenceThreshold)
 	}
 
 	// 出力形式を決定
@@ -121,8 +137,16 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// ファイルに書き込み
+		// ファイルの親ディレクトリも作成
 		fullPath := filepath.Join(outDir, specOutput)
+		parentDir := filepath.Dir(fullPath)
+		if parentDir != "." && parentDir != "" {
+			if err := os.MkdirAll(parentDir, 0755); err != nil {
+				return fmt.Errorf("親ディレクトリ作成エラー: %w", err)
+			}
+		}
+
+		// ファイルに書き込み
 		if err := os.WriteFile(fullPath, output, 0644); err != nil {
 			return fmt.Errorf("ファイル書き込みエラー: %w", err)
 		}

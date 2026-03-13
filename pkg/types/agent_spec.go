@@ -447,3 +447,63 @@ func formatYAMLScalar(value interface{}) string {
 	}
 	return string(data)
 }
+
+// ToClaudeAgentDefinition converts AgentSpec to ClaudeAgentDefinition.
+// This bridges the intermediate specification format to the final agent definition.
+func (s *AgentSpec) ToClaudeAgentDefinition() *ClaudeAgentDefinition {
+	def := NewClaudeAgentDefinition(s.Metadata.Name, s.Metadata.Description)
+
+	// Transfer metadata
+	def.Metadata.Version = s.Metadata.Version
+	def.Metadata.Tags = s.Metadata.Tags
+	def.Metadata.SourceIntentID = s.Intent.Metadata.IntentID
+
+	// Build system prompt from goals and objectives
+	var promptParts []string
+	if s.Intent.Goals.Primary.Main.Description != "" {
+		promptParts = append(promptParts, fmt.Sprintf("Primary Goal: %s", s.Intent.Goals.Primary.Main.Description))
+	}
+	for _, criteria := range s.Intent.Goals.Primary.Main.SuccessCriteria {
+		promptParts = append(promptParts, fmt.Sprintf("- Success Criteria: %s", criteria))
+	}
+	for _, fr := range s.Intent.Objectives.Functional {
+		promptParts = append(promptParts, fmt.Sprintf("- Functional Requirement: %s", fr.Description))
+	}
+	if def.Prompt.SystemPrompt == "" {
+		def.Prompt.SystemPrompt = s.Metadata.Description
+	}
+
+	// Transfer preferences
+	def.Prompt.Traits = make(map[string]string)
+	if s.Intent.Preferences.QualityVsSpeed.Bias != "" {
+		def.Prompt.Traits["quality_bias"] = string(s.Intent.Preferences.QualityVsSpeed.Bias)
+	}
+
+	// Convert tools
+	def.Tools = make([]ToolDefinition, 0, len(s.Tools))
+	for _, t := range s.Tools {
+		def.Tools = append(def.Tools, ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		})
+	}
+
+	// Configure output based on modality
+	if s.Intent.Modality.Primary != "" {
+		def.Output.Format = string(s.Intent.Modality.Primary)
+	}
+	if s.Intent.Modality.Text != nil {
+		def.Output.Language = s.Intent.Modality.Text.Language
+		def.Output.Tone = string(s.Intent.Modality.Text.Tone)
+	}
+
+	// Set timestamps
+	def.Metadata.CreatedAt = s.Intent.Metadata.CreatedAt
+	def.Metadata.UpdatedAt = s.Intent.Metadata.CreatedAt
+
+	return def
+}

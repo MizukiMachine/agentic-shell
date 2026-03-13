@@ -9,14 +9,16 @@ import (
 	"time"
 
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
+	"github.com/MizukiMachine/agentic-shell/pkg/types"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
 
 // generateCmd のフラグ変数
 var (
-	genFrom   string
-	genQuick  bool
+	genFrom    string
+	genQuick   bool
 	genTimeout int
 )
 
@@ -48,12 +50,16 @@ func init() {
 
 	// フラグ設定
 	generateCmd.Flags().StringVarP(&genFrom, "from", "f", "", "入力仕様ファイル (指定しない場合はspec-gatherを実行)")
-	generateCmd.Flags().BoolVarP(&genQuick, "quick", "q", false, "クイックモード")
+	generateCmd.Flags().BoolVarP(&genQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
 	generateCmd.Flags().IntVarP(&genTimeout, "timeout", "t", 300, "タイムアウト（秒）")
 }
 
 // runGenerate はgenerateコマンドのメイン処理です
 func runGenerate(cmd *cobra.Command, args []string) error {
+	// Viperから設定値を取得（設定ファイル・環境変数を反映）
+	outputDir := viper.GetString("output-dir")
+	verbose := viper.GetBool("verbose")
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(genTimeout)*time.Second)
 	defer cancel()
 
@@ -85,13 +91,13 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 
 		agentSpec, err = gatherer.GatherInteractive(ctx, input)
 		if err != nil {
-			return fmt.Errorf("仕様収集エラー: %w", err)
-		}
-
-		// クイックモードの場合、信頼度が低くても許可
-		if genQuick && agentSpec.Intent.Metadata.Confidence < spec.ConfidenceThreshold {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "クイックモード: 信頼度 %.2f で継続\n", agentSpec.Intent.Metadata.Confidence)
+			// クイックモードの場合、信頼度エラーでも部分結果を使用
+			if genQuick && agentSpec != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "クイックモード: 信頼度 %.2f で継続\n", agentSpec.Intent.Metadata.Confidence)
+				}
+			} else {
+				return fmt.Errorf("仕様収集エラー: %w", err)
 			}
 		}
 	}
@@ -103,16 +109,20 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// AgentSpecからClaudeAgentDefinitionに変換
+	claudeDef := agentSpec.ToClaudeAgentDefinition()
+
 	// エージェント定義ファイルを生成
 	outputPath := filepath.Join(outputDir, "agent-definition.yaml")
-	if err := writeAgentDefinition(agentSpec, outputPath); err != nil {
+	if err := writeClaudeAgentDefinition(claudeDef, outputPath); err != nil {
 		return fmt.Errorf("エージェント定義出力エラー: %w", err)
 	}
 
 	fmt.Printf("エージェント定義を生成しました: %s\n", outputPath)
 	if verbose {
 		fmt.Printf("信頼度スコア: %.2f\n", agentSpec.Intent.Metadata.Confidence)
-		fmt.Printf("エージェント名: %s\n", agentSpec.Metadata.Name)
+		fmt.Printf("エージェント名: %s\n", claudeDef.Metadata.Name)
+		fmt.Printf("モデル: %s\n", claudeDef.Model.ModelID)
 	}
 
 	return nil
@@ -125,7 +135,7 @@ func loadSpecFromFile(path string) (*spec.AgentSpec, error) {
 		return nil, err
 	}
 
-	agentSpec := &spec.AgentSpec{}
+	agentSpec := &types.AgentSpec{}
 
 	ext := filepath.Ext(path)
 	switch ext {
@@ -142,9 +152,17 @@ func loadSpecFromFile(path string) (*spec.AgentSpec, error) {
 	return agentSpec, nil
 }
 
-// writeAgentDefinition はエージェント定義ファイルを書き込みます
-func writeAgentDefinition(agentSpec *spec.AgentSpec, path string) error {
-	data, err := yaml.Marshal(agentSpec)
+// writeClaudeAgentDefinition はClaudeAgentDefinitionをYAMLファイルとして書き込みます
+func writeClaudeAgentDefinition(def *types.ClaudeAgentDefinition, path string) error {
+	// 親ディレクトリを作成
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("親ディレクトリ作成エラー: %w", err)
+		}
+	}
+
+	data, err := yaml.Marshal(def)
 	if err != nil {
 		return err
 	}
