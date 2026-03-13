@@ -548,10 +548,14 @@ func inferLabels(spec *types.AgentSpec) map[string]string {
 }
 
 func inferTools(spec *types.AgentSpec) []types.ToolDefinition {
-	selected := map[string]toolCatalogEntry{}
+	selected := map[string]types.ToolDefinition{}
 	addTool(selected, "Read")
 	addTool(selected, "Grep")
 	addTool(selected, "Glob")
+
+	for _, tool := range spec.Tools {
+		addSpecTool(selected, tool, spec.Security)
+	}
 
 	corpus := buildCorpus(spec)
 
@@ -560,30 +564,17 @@ func inferTools(spec *types.AgentSpec) []types.ToolDefinition {
 		addTool(selected, "Edit")
 		addTool(selected, "MultiEdit")
 	}
-	if needsShell(spec, corpus) {
+	if hasAllowedCommands(spec.Security) && needsShell(spec, corpus) {
 		addTool(selected, "Bash")
 	}
-	if needsWebFetch(spec, corpus) {
+	if hasAllowedDomains(spec.Security) && needsWebFetch(spec, corpus) {
 		addTool(selected, "WebFetch")
 	}
-	if needsWebSearch(spec, corpus) {
+	if hasAllowedDomains(spec.Security) && needsWebSearch(spec, corpus) {
 		addTool(selected, "WebSearch")
 	}
 
-	tools := make([]types.ToolDefinition, 0, len(selected))
-	for _, name := range orderedToolNames(selected) {
-		entry := selected[name]
-		tools = append(tools, types.ToolDefinition{
-			Name:        entry.Name,
-			Description: entry.Description,
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-		})
-	}
-
-	return tools
+	return orderedToolDefinitions(selected)
 }
 
 type toolCatalogEntry struct {
@@ -642,22 +633,185 @@ var toolOrder = []string{
 	"WebSearch",
 }
 
-func addTool(selected map[string]toolCatalogEntry, name string) {
+func addTool(selected map[string]types.ToolDefinition, name string) {
 	entry, ok := toolCatalog[name]
 	if !ok {
 		return
 	}
-	selected[name] = entry
+	selected[name] = types.ToolDefinition{
+		Name:        entry.Name,
+		Description: entry.Description,
+		InputSchema: emptyToolInputSchema(),
+	}
 }
 
-func orderedToolNames(selected map[string]toolCatalogEntry) []string {
-	names := make([]string, 0, len(selected))
-	for _, name := range toolOrder {
-		if _, ok := selected[name]; ok {
-			names = append(names, name)
+func addSpecTool(selected map[string]types.ToolDefinition, tool types.Tool, security types.SecurityConfig) {
+	definition, ok := convertSpecTool(tool)
+	if !ok || !isSecurityAllowedTool(definition.Name, security) {
+		return
+	}
+	selected[definition.Name] = definition
+}
+
+func convertSpecTool(tool types.Tool) (types.ToolDefinition, bool) {
+	name := strings.TrimSpace(tool.Name)
+	if name == "" {
+		return types.ToolDefinition{}, false
+	}
+
+	if catalogName, ok := resolveCatalogToolName(name); ok {
+		entry := toolCatalog[catalogName]
+		return types.ToolDefinition{
+			Name:        entry.Name,
+			Description: entry.Description,
+			InputSchema: emptyToolInputSchema(),
+		}, true
+	}
+
+	return types.ToolDefinition{
+		Name:        name,
+		Description: firstNonEmpty(strings.TrimSpace(tool.Description), name),
+		InputSchema: buildToolInputSchema(tool.Parameters),
+	}, true
+}
+
+func resolveCatalogToolName(name string) (string, bool) {
+	trimmed := strings.TrimSpace(name)
+	for catalogName := range toolCatalog {
+		if strings.EqualFold(catalogName, trimmed) {
+			return catalogName, true
 		}
 	}
-	return names
+
+	switch normalizeToolKey(trimmed) {
+	case "shell", "terminal", "commandline", "cli":
+		return "Bash", true
+	case "webfetch", "fetchurl", "urlfetch", "httpfetch":
+		return "WebFetch", true
+	case "websearch", "internetsearch":
+		return "WebSearch", true
+	}
+
+	return "", false
+}
+
+func normalizeToolKey(name string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+		}
+	}
+	return builder.String()
+}
+
+func buildToolInputSchema(parameters []types.ToolParameter) map[string]interface{} {
+	schema := emptyToolInputSchema()
+	properties, _ := schema["properties"].(map[string]interface{})
+	required := make([]string, 0, len(parameters))
+
+	for _, parameter := range parameters {
+		name := strings.TrimSpace(parameter.Name)
+		if name == "" {
+			continue
+		}
+
+		property := map[string]interface{}{
+			"type": normalizeSchemaType(parameter.Type),
+		}
+		if description := strings.TrimSpace(parameter.Description); description != "" {
+			property["description"] = description
+		}
+		if parameter.Default != nil {
+			property["default"] = parameter.Default
+		}
+		if enum := compactStrings(parameter.Enum); len(enum) > 0 {
+			property["enum"] = enum
+		}
+
+		properties[name] = property
+		if parameter.Required {
+			required = append(required, name)
+		}
+	}
+
+	if len(required) > 0 {
+		sort.Strings(required)
+		schema["required"] = required
+	}
+
+	return schema
+}
+
+func normalizeSchemaType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "string":
+		return "string"
+	case "number", "float", "double":
+		return "number"
+	case "integer", "int":
+		return "integer"
+	case "boolean", "bool":
+		return "boolean"
+	case "array", "list":
+		return "array"
+	case "object", "map":
+		return "object"
+	default:
+		return "string"
+	}
+}
+
+func emptyToolInputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type":       "object",
+		"properties": map[string]interface{}{},
+	}
+}
+
+func isSecurityAllowedTool(name string, security types.SecurityConfig) bool {
+	switch name {
+	case "Bash":
+		return hasAllowedCommands(security)
+	case "WebFetch", "WebSearch":
+		return hasAllowedDomains(security)
+	default:
+		return true
+	}
+}
+
+func hasAllowedCommands(security types.SecurityConfig) bool {
+	return len(compactStrings(security.AllowedCommands)) > 0
+}
+
+func hasAllowedDomains(security types.SecurityConfig) bool {
+	return len(compactStrings(security.AllowedDomains)) > 0
+}
+
+func orderedToolDefinitions(selected map[string]types.ToolDefinition) []types.ToolDefinition {
+	tools := make([]types.ToolDefinition, 0, len(selected))
+	seen := make(map[string]struct{}, len(selected))
+
+	for _, name := range toolOrder {
+		if tool, ok := selected[name]; ok {
+			tools = append(tools, tool)
+			seen[name] = struct{}{}
+		}
+	}
+
+	extraNames := make([]string, 0, len(selected)-len(seen))
+	for name := range selected {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		extraNames = append(extraNames, name)
+	}
+	sort.Strings(extraNames)
+	for _, name := range extraNames {
+		tools = append(tools, selected[name])
+	}
+
+	return tools
 }
 
 func buildCorpus(spec *types.AgentSpec) string {
@@ -767,11 +921,14 @@ func frontmatterDescription(def *types.ClaudeAgentDefinition) string {
 
 	description = strings.ReplaceAll(description, "\n", " ")
 	description = strings.Join(strings.Fields(description), " ")
-	if len(description) > 160 {
-		return strings.TrimSpace(description[:157]) + "..."
+	descriptionRunes := []rune(description)
+	if len(descriptionRunes) > maxDescriptionRunes {
+		return strings.TrimSpace(string(descriptionRunes[:maxDescriptionRunes-3])) + "..."
 	}
 	return description
 }
+
+const maxDescriptionRunes = 160
 
 func toolNames(tools []types.ToolDefinition) []string {
 	names := make([]string, 0, len(tools))

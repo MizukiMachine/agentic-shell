@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	types "github.com/MizukiMachine/agentic-shell/pkg/types"
 )
@@ -67,6 +68,104 @@ func TestGeneratorRenderMarkdown(t *testing.T) {
 func TestMarkdownFileName(t *testing.T) {
 	if got := MarkdownFileName("  Code Reviewer v2  "); got != "code-reviewer-v2" {
 		t.Fatalf("expected sanitized file name, got %q", got)
+	}
+}
+
+func TestInferToolsRespectsSecurityConstraints(t *testing.T) {
+	spec := validAgentSpec()
+	spec.Security.AllowedCommands = nil
+	spec.Security.AllowedDomains = nil
+	spec.Tools = []types.Tool{
+		{
+			ID:          "tool-1",
+			Name:        "Shell",
+			Description: "Execute shell commands",
+			Category:    "processing",
+			RiskLevel:   "high",
+		},
+		{
+			ID:          "tool-2",
+			Name:        "WebFetch",
+			Description: "Fetch external pages",
+			Category:    "communication",
+			RiskLevel:   "medium",
+		},
+		{
+			ID:          "tool-3",
+			Name:        "Custom Inspector",
+			Description: "Inspect custom resources",
+			Category:    "processing",
+			RiskLevel:   "low",
+			Parameters: []types.ToolParameter{
+				{
+					Name:        "target",
+					Type:        "string",
+					Description: "inspection target",
+					Required:    true,
+				},
+			},
+		},
+	}
+
+	def, err := NewGenerator().Generate(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	names := toolNames(def.Tools)
+	for _, forbidden := range []string{"Bash", "WebFetch", "WebSearch"} {
+		if containsTool(names, forbidden) {
+			t.Fatalf("did not expect tool %q in %v", forbidden, names)
+		}
+	}
+	if !containsTool(names, "Custom Inspector") {
+		t.Fatalf("expected custom tool in %v", names)
+	}
+}
+
+func TestInferToolsUsesCatalogDefinitions(t *testing.T) {
+	spec := validAgentSpec()
+	spec.Tools = []types.Tool{
+		{
+			ID:          "tool-1",
+			Name:        "Shell",
+			Description: "user provided shell description",
+			Category:    "processing",
+			RiskLevel:   "high",
+		},
+	}
+
+	def, err := NewGenerator().Generate(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	for _, tool := range def.Tools {
+		if tool.Name != "Bash" {
+			continue
+		}
+		if tool.Description != toolCatalog["Bash"].Description {
+			t.Fatalf("expected catalog description %q, got %q", toolCatalog["Bash"].Description, tool.Description)
+		}
+		return
+	}
+
+	t.Fatalf("expected Bash tool in generated tools")
+}
+
+func TestFrontmatterDescription_UTF8Safe(t *testing.T) {
+	def := types.NewClaudeAgentDefinition("utf8-agent", strings.Repeat("あ", maxDescriptionRunes+10))
+
+	got := frontmatterDescription(def)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("frontmatter description is not valid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected truncated description to end with ellipsis, got %q", got)
+	}
+	if runeCount := len([]rune(got)); runeCount != maxDescriptionRunes {
+		t.Fatalf("expected %d runes, got %d", maxDescriptionRunes, runeCount)
 	}
 }
 
