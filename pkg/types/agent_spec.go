@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ============================================================================
@@ -309,14 +311,20 @@ func (s *AgentSpec) Validate() error {
 	return nil
 }
 
-// ToJSON serializes AgentSpec to JSON.
+// ToJSON は AgentSpec を JSON にシリアライズします。
 func (s *AgentSpec) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
 }
 
-// ToYAML serializes AgentSpec to a YAML string.
+// ToYAML は AgentSpec を YAML 文字列にシリアライズします。
 func (s *AgentSpec) ToYAML() (string, error) {
-	data, err := json.Marshal(s)
+	data, err := yaml.Marshal(s)
+	if err == nil {
+		return string(data), nil
+	}
+
+	// yaml ライブラリで失敗した場合のみ、既存の手書き実装にフォールバックする。
+	data, err = json.Marshal(s)
 	if err != nil {
 		return "", err
 	}
@@ -331,12 +339,12 @@ func (s *AgentSpec) ToYAML() (string, error) {
 	return builder.String(), nil
 }
 
-// FromJSON deserializes AgentSpec from JSON.
+// FromJSON は JSON から AgentSpec を復元します。
 func (s *AgentSpec) FromJSON(data []byte) error {
 	return json.Unmarshal(data, s)
 }
 
-// NewAgentSpec creates a new AgentSpec with default values.
+// NewAgentSpec はデフォルト値を持つ AgentSpec を生成します。
 func NewAgentSpec(name, version string) *AgentSpec {
 	return &AgentSpec{
 		Metadata: AgentSpecMetadata{

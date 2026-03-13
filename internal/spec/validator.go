@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Validate は AgentSpec 全体を検証し、算出した信頼度を Metadata に反映します。
 func Validate(spec *AgentSpec) error {
 	if err := ValidateRequiredFields(spec); err != nil {
 		return err
@@ -12,12 +13,15 @@ func Validate(spec *AgentSpec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("invalid agent spec: %w", err)
 	}
-	if err := ValidateConfidence(calculateConfidence(spec)); err != nil {
+	confidence := calculateConfidence(spec)
+	spec.Intent.Metadata.Confidence = confidence
+	if err := ValidateConfidence(confidence); err != nil {
 		return err
 	}
 	return nil
 }
 
+// ValidateRequiredFields は最小限必要な必須フィールドの有無を検証します。
 func ValidateRequiredFields(spec *AgentSpec) error {
 	if spec == nil {
 		return fmt.Errorf("spec is required")
@@ -51,6 +55,7 @@ func ValidateRequiredFields(spec *AgentSpec) error {
 	return nil
 }
 
+// ValidateConfidence は信頼度が許容範囲かつ閾値以上かを検証します。
 func ValidateConfidence(confidence float64) error {
 	switch {
 	case confidence < 0 || confidence > 1:

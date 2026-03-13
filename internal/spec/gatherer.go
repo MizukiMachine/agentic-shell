@@ -15,8 +15,10 @@ import (
 
 const maxGatherRounds = 5
 
+// AgentSpec は types.AgentSpec の別名です。
 type AgentSpec = types.AgentSpec
 
+// Gatherer は対話入力から AgentSpec を段階的に構築します。
 type Gatherer struct {
 	input      io.Reader
 	reader     *bufio.Reader
@@ -26,6 +28,7 @@ type Gatherer struct {
 	now        func() time.Time
 }
 
+// NewGatherer は対話収集に使う Gatherer を生成します。
 func NewGatherer(input io.Reader, output io.Writer) *Gatherer {
 	var reader *bufio.Reader
 	if input != nil {
@@ -42,6 +45,7 @@ func NewGatherer(input io.Reader, output io.Writer) *Gatherer {
 	}
 }
 
+// GatherInteractive は質問と回答を通じて AgentSpec を補完します。
 func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (*AgentSpec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -77,7 +81,7 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 			return nil, err
 		}
 
-		answer, err := g.readLine()
+		answer, err := g.readLine(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -97,14 +101,26 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 }
 
 func generateStepBackQuestions(input string) []string {
-	_ = input
+	focus := questionFocus(input)
 
-	return []string{
+	questions := []string{
 		"What is the core problem we are trying to solve?",
 		"Why is this goal important in the bigger picture?",
 		"What are the fundamental principles guiding this work?",
 		"What would the ideal solution look like?",
 		"How does this connect to our broader objectives?",
+	}
+
+	if focus == "" {
+		return questions
+	}
+
+	return []string{
+		fmt.Sprintf("What is the core problem we are trying to solve for %s?", focus),
+		fmt.Sprintf("Why is %s important in the bigger picture?", focus),
+		fmt.Sprintf("What principles should guide the %s work?", focus),
+		fmt.Sprintf("What would the ideal %s solution look like?", focus),
+		fmt.Sprintf("How does %s connect to our broader objectives?", focus),
 	}
 }
 
@@ -196,12 +212,29 @@ func (g *Gatherer) buildInitialSpec(initialInput string) *AgentSpec {
 	return spec
 }
 
-func (g *Gatherer) readLine() (string, error) {
-	line, err := g.reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
+func (g *Gatherer) readLine(ctx context.Context) (string, error) {
+	type lineResult struct {
+		line string
+		err  error
 	}
-	return strings.TrimSpace(line), nil
+
+	resultCh := make(chan lineResult, 1)
+
+	// bufio.Reader の ReadString はキャンセル不能なので goroutine で分離し、ctx を優先監視する。
+	go func() {
+		line, err := g.reader.ReadString('\n')
+		resultCh <- lineResult{
+			line: strings.TrimSpace(line),
+			err:  normalizeReadLineError(line, err),
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		return result.line, result.err
+	}
 }
 
 func (g *Gatherer) applyStepBackResponse(spec *AgentSpec, round int, answer string) {
@@ -226,6 +259,7 @@ func (g *Gatherer) applyCoreProblem(spec *AgentSpec, answer string) {
 		spec.Intent.Goals.Primary.Main.SuccessCriteria,
 		"Core problem is stated in a way that engineering work can begin",
 	)
+	g.syncPrimaryMainGoal(spec)
 
 	if len(spec.Intent.Objectives.Functional) == 0 {
 		spec.Intent.Objectives.Functional = append(spec.Intent.Objectives.Functional, types.FunctionalRequirement{
@@ -241,6 +275,14 @@ func (g *Gatherer) applyCoreProblem(spec *AgentSpec, answer string) {
 			"Core problem is captured explicitly",
 		)
 	}
+}
+
+func (g *Gatherer) syncPrimaryMainGoal(spec *AgentSpec) {
+	if len(spec.Intent.Goals.AllGoals) == 0 {
+		spec.Intent.Goals.AllGoals = append(spec.Intent.Goals.AllGoals, spec.Intent.Goals.Primary.Main)
+		return
+	}
+	spec.Intent.Goals.AllGoals[0] = spec.Intent.Goals.Primary.Main
 }
 
 func (g *Gatherer) applyBiggerPicture(spec *AgentSpec, answer string) {
@@ -461,6 +503,29 @@ func inferToolName(answer string) string {
 	}
 }
 
+func questionFocus(input string) string {
+	genericWords := map[string]struct{}{
+		"a": {}, "an": {}, "agent": {}, "build": {}, "create": {}, "feature": {},
+		"implement": {}, "make": {}, "support": {}, "system": {}, "tool": {},
+	}
+
+	focus := make([]string, 0, 2)
+	for _, keyword := range extractKeywords(input) {
+		if _, skip := genericWords[keyword]; skip {
+			continue
+		}
+		if len(keyword) <= 2 {
+			continue
+		}
+		focus = append(focus, keyword)
+		if len(focus) == 2 {
+			break
+		}
+	}
+
+	return strings.Join(focus, " ")
+}
+
 func extractKeywords(input string) []string {
 	stopWords := map[string]struct{}{
 		"the": {}, "and": {}, "for": {}, "with": {}, "this": {}, "that": {},
@@ -542,11 +607,56 @@ func appendUnique(values []string, additions ...string) []string {
 }
 
 func containsAny(input string, keywords ...string) bool {
+	tokens := splitWordTokens(strings.ToLower(input))
+	if len(tokens) == 0 {
+		return false
+	}
+
 	for _, keyword := range keywords {
-		if strings.Contains(input, keyword) {
+		if containsTokenSequence(tokens, splitWordTokens(strings.ToLower(keyword))) {
 			return true
 		}
 	}
+	return false
+}
+
+func normalizeReadLineError(line string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if err == io.EOF {
+		if strings.TrimSpace(line) != "" {
+			return fmt.Errorf("interactive input ended unexpectedly before a newline: %w", err)
+		}
+		return fmt.Errorf("interactive input ended unexpectedly: %w", err)
+	}
+	return err
+}
+
+func splitWordTokens(input string) []string {
+	return strings.FieldsFunc(input, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func containsTokenSequence(tokens, keywordTokens []string) bool {
+	if len(keywordTokens) == 0 || len(keywordTokens) > len(tokens) {
+		return false
+	}
+
+	for start := 0; start <= len(tokens)-len(keywordTokens); start++ {
+		matched := true
+		for offset, keyword := range keywordTokens {
+			if tokens[start+offset] != keyword {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+
 	return false
 }
 

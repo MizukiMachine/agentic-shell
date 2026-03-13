@@ -5,6 +5,8 @@ package types
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAgentSpecMetadataValidation(t *testing.T) {
@@ -367,15 +369,26 @@ func TestAgentSpecToYAML(t *testing.T) {
 		},
 	}
 
-	yaml, err := spec.ToYAML()
+	yamlText, err := spec.ToYAML()
 	if err != nil {
 		t.Fatalf("ToYAML returned error: %v", err)
 	}
-	if yaml == "" {
+	if yamlText == "" {
 		t.Fatal("expected YAML output to be non-empty")
 	}
-	if !strings.Contains(yaml, "metadata:") || !strings.Contains(yaml, "name: \"yaml-test-agent\"") {
-		t.Fatalf("unexpected YAML output: %s", yaml)
+	if !strings.Contains(yamlText, "metadata:") || !strings.Contains(yamlText, "name: yaml-test-agent") {
+		t.Fatalf("unexpected YAML output: %s", yamlText)
+	}
+
+	var decoded AgentSpec
+	if err := yaml.Unmarshal([]byte(yamlText), &decoded); err != nil {
+		t.Fatalf("generated YAML should be parseable: %v", err)
+	}
+	if decoded.Metadata.Name != spec.Metadata.Name {
+		t.Fatalf("name mismatch after YAML round trip: got %q, want %q", decoded.Metadata.Name, spec.Metadata.Name)
+	}
+	if decoded.Intent.Goals.Primary.Main.Description != spec.Intent.Goals.Primary.Main.Description {
+		t.Fatalf("goal description mismatch after YAML round trip: got %q, want %q", decoded.Intent.Goals.Primary.Main.Description, spec.Intent.Goals.Primary.Main.Description)
 	}
 }
 

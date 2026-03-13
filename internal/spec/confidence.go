@@ -6,10 +6,13 @@ import (
 	"unicode/utf8"
 )
 
+// ConfidenceThreshold は収集結果を採用可能とみなす最小信頼度です。
 const ConfidenceThreshold = 0.85
 
+// ConfidenceCalculator は AgentSpec の充足度から信頼度を算出します。
 type ConfidenceCalculator struct{}
 
+// Calculate は AgentSpec の内容を採点し、0.0 から 1.0 の信頼度を返します。
 func (c *ConfidenceCalculator) Calculate(spec *AgentSpec) float64 {
 	if spec == nil {
 		return 0
