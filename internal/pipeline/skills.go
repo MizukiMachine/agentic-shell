@@ -2,12 +2,12 @@ package pipeline
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	skillpkg "github.com/MizukiMachine/agentic-shell/internal/skill"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,38 +22,12 @@ func ScanSkills(env *Envelope, dir string) error {
 		Skills:    []SkillInfo{},
 	}
 
-	info, err := os.Stat(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			env.SkillScan = result
-			return nil
-		}
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("skills path is not a directory: %s", dir)
-	}
-
-	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if !isSkillFile(dir, path) {
-			return nil
-		}
-
-		skill, err := parseSkillFile(dir, path)
-		if err != nil {
-			return err
-		}
-		result.Skills = append(result.Skills, skill)
-		return nil
-	})
+	skills, err := skillpkg.ScanSkills(dir)
 	if err != nil {
 		return err
+	}
+	for _, skill := range skills {
+		result.Skills = append(result.Skills, mapSkillInfo(skill))
 	}
 
 	sort.Slice(result.Skills, func(i, j int) bool {
@@ -73,6 +47,7 @@ func MatchSkills(env *Envelope) error {
 		return fmt.Errorf("skill scan result is required")
 	}
 
+	scannedSkills := mapSkillFiles(env.SkillScan.Skills)
 	result := &MatchResult{
 		Matches:       []RequirementMatch{},
 		MissingSkills: []SkillRequirement{},
@@ -86,17 +61,18 @@ func MatchSkills(env *Envelope) error {
 			Matches:         []MatchedSkill{},
 		}
 
-		reqTokens := uniqueStrings(append(tokenize(requirement.Name+" "+requirement.Description), requirement.Keywords...))
-		for _, skill := range env.SkillScan.Skills {
-			score, reasons := scoreSkillMatch(reqTokens, requirement.Name, skill)
-			if score <= 0 {
-				continue
-			}
+		reqMeta := skillpkg.SkillMeta{
+			Name:        requirement.Name,
+			Description: requirement.Description,
+			Tags:        append([]string{}, requirement.Keywords...),
+		}
+
+		for _, matched := range skillpkg.MatchSkills(reqMeta, scannedSkills) {
 			match.Matches = append(match.Matches, MatchedSkill{
-				Name:    skill.Name,
-				Path:    skill.Path,
-				Score:   score,
-				Reasons: reasons,
+				Name:    matched.Skill.Metadata.Name,
+				Path:    matched.Skill.Path,
+				Score:   matched.Score,
+				Reasons: matchedKeywordReasons(requirement.Name, matched),
 			})
 		}
 
@@ -199,74 +175,53 @@ func WriteGeneratedFiles(env *Envelope, baseDir, skillsDir string, overwrite boo
 	return nil
 }
 
-func parseSkillFile(rootDir, path string) (SkillInfo, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return SkillInfo{}, err
-	}
-
-	doc, err := ParseDocument(path, data, detectFormat(path, data))
-	if err != nil {
-		return SkillInfo{}, err
-	}
-
-	name := firstNonEmpty(
-		stringValue(doc.Metadata["name"]),
-		doc.Title,
-		trimExtension(filepath.Base(path)),
-	)
-	description := firstNonEmpty(
-		stringValue(doc.Metadata["description"]),
-		doc.Summary,
-	)
-
-	relative, err := filepath.Rel(rootDir, path)
-	if err != nil {
-		relative = path
-	}
+func mapSkillInfo(skillFile skillpkg.SkillFile) SkillInfo {
+	name := firstNonEmpty(skillFile.Metadata.Name, trimExtension(filepath.Base(skillFile.Path)))
 
 	return SkillInfo{
 		Name:        name,
-		Description: description,
-		Path:        filepath.ToSlash(relative),
-		Keywords:    uniqueStrings(tokenize(name + " " + description + " " + doc.Raw)),
-	}, nil
+		Category:    skillFile.Metadata.Category,
+		Description: skillFile.Metadata.Description,
+		Path:        skillFile.Path,
+		Tools:       append([]string{}, skillFile.Metadata.Tools...),
+		Tags:        append([]string{}, skillFile.Metadata.Tags...),
+		Keywords: uniqueStrings(append(
+			tokenize(name+" "+skillFile.Metadata.Description+" "+skillFile.RawContent),
+			skillFile.Metadata.Tags...,
+		)),
+	}
 }
 
-func scoreSkillMatch(requirementTokens []string, requirementName string, skill SkillInfo) (float64, []string) {
-	skillTokens := uniqueStrings(append(tokenize(skill.Name+" "+skill.Description), skill.Keywords...))
-	if len(requirementTokens) == 0 || len(skillTokens) == 0 {
-		return 0, nil
+func mapSkillFiles(skills []SkillInfo) []skillpkg.SkillFile {
+	result := make([]skillpkg.SkillFile, 0, len(skills))
+	for _, skill := range skills {
+		result = append(result, skillpkg.SkillFile{
+			Path: skill.Path,
+			Metadata: skillpkg.SkillMeta{
+				Name:        skill.Name,
+				Category:    skill.Category,
+				Description: skill.Description,
+				Tools:       append([]string{}, skill.Tools...),
+				Tags:        append([]string{}, skill.Tags...),
+			},
+			RawContent: strings.Join(skill.Keywords, " "),
+		})
 	}
+	return result
+}
 
-	skillSet := make(map[string]struct{}, len(skillTokens))
-	for _, token := range skillTokens {
-		skillSet[token] = struct{}{}
+func matchedKeywordReasons(requirementName string, matched skillpkg.SkillMatch) []string {
+	reasons := make([]string, 0, len(matched.MatchedKeywords)+2)
+	for _, keyword := range matched.MatchedKeywords {
+		reasons = append(reasons, "shared keyword: "+keyword)
 	}
-
-	overlap := 0
-	reasons := []string{}
-	for _, token := range requirementTokens {
-		if _, ok := skillSet[token]; ok {
-			overlap++
-			reasons = append(reasons, "shared keyword: "+token)
-		}
-	}
-
-	score := float64(overlap) / float64(len(requirementTokens))
-	if slugify(requirementName) == slugify(skill.Name) {
-		score += 0.5
+	if slugify(requirementName) == slugify(matched.Skill.Metadata.Name) {
 		reasons = append(reasons, "exact normalized name match")
 	}
-	if strings.Contains(slugify(skill.Name), slugify(requirementName)) || strings.Contains(slugify(requirementName), slugify(skill.Name)) {
-		score += 0.2
+	if strings.Contains(slugify(matched.Skill.Metadata.Name), slugify(requirementName)) || strings.Contains(slugify(requirementName), slugify(matched.Skill.Metadata.Name)) {
 		reasons = append(reasons, "partial normalized name match")
 	}
-	if score > 1 {
-		score = 1
-	}
-
-	return score, uniqueStrings(reasons)
+	return uniqueStrings(reasons)
 }
 
 func renderSkillPlaceholder(skill SkillRequirement) (string, error) {
@@ -304,35 +259,4 @@ func renderSkillPlaceholder(skill SkillRequirement) (string, error) {
 
 - Generated by the agentic-shell placeholder pipeline.
 `, string(frontMatter), skill.Name, skill.Description)) + "\n", nil
-}
-
-func isSkillFile(rootDir, path string) bool {
-	lower := strings.ToLower(filepath.Base(path))
-	switch {
-	case lower == "skill.md":
-		return true
-	case strings.HasSuffix(lower, ".skill"):
-		return true
-	case lower == "readme.md", lower == "readme.markdown":
-		return false
-	}
-
-	ext := strings.ToLower(filepath.Ext(lower))
-	if ext != ".md" && ext != ".markdown" {
-		return false
-	}
-
-	relative, err := filepath.Rel(rootDir, path)
-	if err != nil {
-		return false
-	}
-
-	parts := strings.Split(filepath.ToSlash(relative), "/")
-	if len(parts) < 2 {
-		return false
-	}
-
-	parent := strings.ToLower(parts[len(parts)-2])
-	name := strings.ToLower(trimExtension(parts[len(parts)-1]))
-	return name == parent
 }
