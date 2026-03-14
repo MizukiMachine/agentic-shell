@@ -7,6 +7,15 @@
 - `spec-gather`: Step-back 質問で要件を収集し、`AgentSpec` を YAML/JSON に出力
 - `generate`: `AgentSpec` から `.claude/agents/*.md` を生成
 
+加えて、仕様解析からスキル補完までを段階実行できる pipeline サブコマンドも使えます。
+
+- `parse`: Markdown/YAML の仕様を共通 Envelope に変換
+- `extract`: 仕様から要件と必要スキルを抽出
+- `skill-scan`: 既存スキルディレクトリを走査
+- `match`: 必要スキルと既存スキルを照合
+- `skill-gen`: 不足スキルのプレースホルダー生成計画を作成
+- `output`: `--skills-dir` 配下へ不足スキルの `SKILL.md` を書き出し
+
 詳細な構造は [ARCHITECTURE.md](./ARCHITECTURE.md) を参照してください。
 
 ## インストール
@@ -62,6 +71,19 @@ make build
 ```bash
 ./agentic-shell version
 ```
+
+### 5. pipeline サブコマンドをつなげて不足スキルを生成する
+
+```bash
+./agentic-shell parse spec.md \
+  | ./agentic-shell extract \
+  | ./agentic-shell skill-scan --skills-dir .claude/skills \
+  | ./agentic-shell match --skills-dir .claude/skills \
+  | ./agentic-shell skill-gen --skills-dir .claude/skills \
+  | ./agentic-shell output --skills-dir .claude/skills
+```
+
+`--skills-dir custom/skills` のように指定すると、`output` は `custom/skills/<skill-name>/SKILL.md` へ書き出します。
 
 ## 設定方法
 

@@ -59,6 +59,31 @@ func TestGenerateCommandExists(t *testing.T) {
 	}
 }
 
+func TestPipelineCommandsExist(t *testing.T) {
+	tests := []string{
+		"parse",
+		"extract",
+		"skill-scan",
+		"match",
+		"skill-gen",
+		"output",
+	}
+
+	cmd := GetRootCmd()
+	for _, name := range tests {
+		found, _, err := cmd.Find([]string{name})
+		if err != nil {
+			t.Fatalf("%s command not found: %v", name, err)
+		}
+		if found == nil {
+			t.Fatalf("%s command is nil", name)
+		}
+		if found.Name() != name {
+			t.Fatalf("expected command name %q, got %q", name, found.Name())
+		}
+	}
+}
+
 func TestVersionOutput(t *testing.T) {
 	// バージョン情報を設定
 	Version = "test-version"
