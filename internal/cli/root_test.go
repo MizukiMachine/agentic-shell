@@ -66,6 +66,7 @@ func TestPipelineCommandsExist(t *testing.T) {
 		"skill-scan",
 		"match",
 		"skill-gen",
+		"skill-generate",
 		"output",
 	}
 
