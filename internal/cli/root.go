@@ -44,6 +44,10 @@ Claude、GPT、Gemini などの AI エージェントと対話しながら
 		cmd.Help()
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// help と version コマンドは設定エラーでも動作させる
+		if cmd.Name() == "help" || cmd.Name() == "version" {
+			return nil
+		}
 		return initConfigErr
 	},
 }

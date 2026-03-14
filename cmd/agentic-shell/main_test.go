@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,19 +11,55 @@ import (
 	"testing"
 )
 
+var (
+	testBinaryPath  string
+	testProjectRoot string
+)
+
+func TestMain(m *testing.M) {
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to get working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	testProjectRoot = filepath.Dir(filepath.Dir(wd))
+
+	tempDir, err := os.MkdirTemp("", "agentic-shell-test-binary-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	testBinaryPath = filepath.Join(tempDir, "agentic-shell")
+	buildCmd := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/agentic-shell")
+	buildCmd.Dir = testProjectRoot
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build test binary: %v\n%s", err, output)
+		_ = os.RemoveAll(tempDir)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	_ = os.RemoveAll(tempDir)
+	os.Exit(code)
+}
+
 // getBinaryPath はテスト用バイナリのパスを取得します
-func getBinaryPath() string {
-	// 作業ディレクトリからの相対パスを解決
-	wd, _ := os.Getwd()
-	// プロジェクトルートに移動してbin/agentic-shellを探す
-	projectRoot := filepath.Dir(filepath.Dir(wd))
-	return filepath.Join(projectRoot, "bin", "agentic-shell")
+func getBinaryPath(t *testing.T) string {
+	t.Helper()
+
+	if testBinaryPath == "" {
+		t.Fatal("test binary path is not initialized")
+	}
+
+	return testBinaryPath
 }
 
 // TestVersionCommand は version コマンドをテストします
 func TestVersionCommand(t *testing.T) {
 	// ビルドしたバイナリをテスト
-	binaryPath := getBinaryPath()
+	binaryPath := getBinaryPath(t)
 	cmd := exec.Command(binaryPath, "version")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -41,7 +78,7 @@ func TestVersionCommand(t *testing.T) {
 
 // TestHelpCommand は help コマンドをテストします
 func TestHelpCommand(t *testing.T) {
-	binaryPath := getBinaryPath()
+	binaryPath := getBinaryPath(t)
 	cmd := exec.Command(binaryPath, "--help")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -61,7 +98,7 @@ func TestHelpCommand(t *testing.T) {
 
 // TestRootCommand は引数なしで実行した場合をテストします
 func TestRootCommand(t *testing.T) {
-	binaryPath := getBinaryPath()
+	binaryPath := getBinaryPath(t)
 	cmd := exec.Command(binaryPath)
 	var out bytes.Buffer
 	cmd.Stdout = &out

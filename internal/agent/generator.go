@@ -44,7 +44,8 @@ func NewGeneratorWithConfig(cfg GeneratorConfig) *Generator {
 	if cfg.DefaultTemperature >= 0 && cfg.DefaultTemperature <= 1 {
 		g.defaultTemperature = cfg.DefaultTemperature
 	}
-	if cfg.ConfidenceThreshold > 0 && cfg.ConfidenceThreshold <= 1 {
+	// 0 も有効な値として許容（quick モード等で閾値チェックを無効化する場合）
+	if cfg.ConfidenceThreshold >= 0 && cfg.ConfidenceThreshold <= 1 {
 		g.confidenceThreshold = cfg.ConfidenceThreshold
 	}
 	return g

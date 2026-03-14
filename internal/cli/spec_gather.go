@@ -109,8 +109,15 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 			agentSpec.Intent.Metadata.Confidence, cfg.Gathering.ConfidenceThreshold)
 	}
 
-	// 出力形式を決定
+	// 出力形式を決定（優先順位: --format > 拡張子 > 設定ファイル > デフォルト）
 	format := specFormat
+	if !cmd.Flags().Changed("format") {
+		// --format が指定されていない場合、設定ファイルの値を確認
+		if cfg.Output.Format != "" {
+			format = cfg.Output.Format
+		}
+	}
+	// ファイル拡張子が明示的な場合はそれを優先
 	if specOutput != "" {
 		ext := filepath.Ext(specOutput)
 		if ext == ".json" {
