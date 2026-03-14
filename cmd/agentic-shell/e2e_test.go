@@ -107,6 +107,73 @@ func TestE2EGenerateFromSpecCreatesAgentFile(t *testing.T) {
 	}
 }
 
+func TestE2EPipelineSubcommandsCanBeChained(t *testing.T) {
+	workdir := t.TempDir()
+	configPath := writeE2EConfig(t, workdir)
+
+	skillDir := filepath.Join(workdir, ".claude", "skills", "code-review")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("failed to create skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(strings.TrimSpace(`
+---
+name: "code-review"
+description: "Review code changes and provide actionable feedback"
+---
+
+# code-review
+`)), 0644); err != nil {
+		t.Fatalf("failed to seed skill file: %v", err)
+	}
+
+	specPath := filepath.Join(workdir, "pipeline-spec.md")
+	if err := os.WriteFile(specPath, []byte(strings.TrimSpace(`
+# Review Pipeline
+
+Build an individual CLI pipeline for code review and security analysis.
+
+## Requirements
+- Each stage must be independently executable
+- Support chaining with Unix pipes
+`)), 0644); err != nil {
+		t.Fatalf("failed to write spec file: %v", err)
+	}
+
+	command := strings.Join([]string{
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " parse " + shellQuote(specPath),
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " extract",
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " skill-scan --skills-dir .claude/skills",
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " match --skills-dir .claude/skills",
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " skill-gen --skills-dir .claude/skills",
+		getBinaryPath(t) + " --config " + shellQuote(configPath) + " output --skills-dir .claude/skills",
+	}, " | ")
+
+	cmd := exec.Command("bash", "-lc", command)
+	cmd.Dir = workdir
+	cmd.Env = append(os.Environ(), "HOME="+workdir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("pipeline execution failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	generated := filepath.Join(workdir, ".claude", "skills", "security-audit", "SKILL.md")
+	data, err := os.ReadFile(generated)
+	if err != nil {
+		t.Fatalf("expected placeholder skill file to be created: %v", err)
+	}
+	if !strings.Contains(string(data), "Placeholder skill generated") {
+		t.Fatalf("expected placeholder content, got:\n%s", string(data))
+	}
+	if !strings.Contains(stdout.String(), "\"written_files\"") {
+		t.Fatalf("expected output summary JSON, got:\n%s", stdout.String())
+	}
+}
+
 func writeE2EConfig(t *testing.T, dir string) string {
 	t.Helper()
 
@@ -163,4 +230,8 @@ func e2eSpecGatherAnswers() string {
 		"The ideal solution is an interactive Go CLI that captures requirements and exports validated YAML for a code review agent",
 		"It supports broader objectives like reusable agent definitions and repeatable automation",
 	}, "\n") + "\n"
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
