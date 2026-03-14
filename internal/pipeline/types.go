@@ -46,7 +46,9 @@ type Requirement struct {
 type SkillRequirement struct {
 	ID          string   `json:"id" yaml:"id"`
 	Name        string   `json:"name" yaml:"name"`
+	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
 	Description string   `json:"description" yaml:"description"`
+	Tools       []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 	Required    bool     `json:"required" yaml:"required"`
 	Source      string   `json:"source,omitempty" yaml:"source,omitempty"`
@@ -63,8 +65,11 @@ type ExtractionResult struct {
 // SkillInfo describes a discovered skill file.
 type SkillInfo struct {
 	Name        string   `json:"name" yaml:"name"`
+	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Path        string   `json:"path" yaml:"path"`
+	Tools       []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Keywords    []string `json:"keywords,omitempty" yaml:"keywords,omitempty"`
 }
 

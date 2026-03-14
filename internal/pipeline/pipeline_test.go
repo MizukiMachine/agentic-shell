@@ -117,6 +117,68 @@ Build a CLI workflow for code review and security validation.
 	}
 }
 
+func TestMatchSkillsUsesCategoryAndToolWeightingFromPipeline(t *testing.T) {
+	env := &Envelope{
+		Extraction: &ExtractionResult{
+			SkillRequirements: []SkillRequirement{
+				{
+					ID:          "req-1",
+					Name:        "deploy automation",
+					Category:    "automation",
+					Description: "Automate deployment workflows",
+					Tools:       []string{"kubectl"},
+					Keywords:    []string{"deploy", "automation", "kubectl"},
+					Required:    true,
+				},
+			},
+		},
+		SkillScan: &SkillScanResult{
+			Directory: ".claude/skills",
+			Skills: []SkillInfo{
+				{
+					Name:        "deploy automation",
+					Category:    "operations",
+					Description: "Automate deployment workflows",
+					Path:        "a-tool-only/SKILL.md",
+					Tools:       []string{"kubectl"},
+					Keywords:    []string{"deploy", "automation", "kubectl"},
+				},
+				{
+					Name:        "deploy automation",
+					Category:    "automation",
+					Description: "Automate deployment workflows",
+					Path:        "b-category-only/SKILL.md",
+					Tools:       []string{"helm"},
+					Keywords:    []string{"deploy", "automation", "kubectl"},
+				},
+				{
+					Name:        "deploy automation",
+					Category:    "automation",
+					Description: "Automate deployment workflows",
+					Path:        "c-both/SKILL.md",
+					Tools:       []string{"kubectl"},
+					Keywords:    []string{"deploy", "automation", "kubectl"},
+				},
+			},
+		},
+	}
+
+	if err := MatchSkills(env); err != nil {
+		t.Fatalf("MatchSkills() error = %v", err)
+	}
+	if len(env.Match.Matches) != 1 {
+		t.Fatalf("expected one requirement match, got %d", len(env.Match.Matches))
+	}
+
+	matches := env.Match.Matches[0].Matches
+	if len(matches) == 0 {
+		t.Fatal("expected ranked matches")
+	}
+	if matches[0].Path != "c-both/SKILL.md" {
+		t.Fatalf("expected category+tool match to rank first, got %+v", matches)
+	}
+}
+
 func TestWriteGeneratedFilesRespectsSkillsDir(t *testing.T) {
 	dir := t.TempDir()
 	env := &Envelope{

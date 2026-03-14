@@ -313,7 +313,9 @@ func deriveSkillRequirements(documents []ParsedDocument, spec *types.AgentSpec, 
 				skillRequirements = append(skillRequirements, SkillRequirement{
 					ID:          slugify(inferred),
 					Name:        inferred,
+					Category:    requirement.Category,
 					Description: requirement.Description,
+					Tools:       inferredSkillTools(requirement),
 					Keywords:    uniqueStrings(append(tokenize(inferred), requirement.Keywords...)),
 					Required:    true,
 					Source:      requirement.Source,
@@ -384,6 +386,8 @@ func dedupeSkillRequirements(items []SkillRequirement) []SkillRequirement {
 		}
 		item.ID = firstNonEmpty(item.ID, key)
 		item.Name = firstNonEmpty(item.Name, key)
+		item.Category = strings.TrimSpace(item.Category)
+		item.Tools = uniqueStrings(item.Tools)
 		item.Keywords = uniqueStrings(item.Keywords)
 		if _, ok := seen[key]; !ok {
 			order = append(order, key)
@@ -392,6 +396,8 @@ func dedupeSkillRequirements(items []SkillRequirement) []SkillRequirement {
 		}
 
 		existing := seen[key]
+		existing.Category = firstNonEmpty(existing.Category, item.Category)
+		existing.Tools = uniqueStrings(append(existing.Tools, item.Tools...))
 		existing.Keywords = uniqueStrings(append(existing.Keywords, item.Keywords...))
 		existing.Description = firstNonEmpty(existing.Description, item.Description)
 		existing.Source = firstNonEmpty(existing.Source, item.Source)
@@ -403,6 +409,13 @@ func dedupeSkillRequirements(items []SkillRequirement) []SkillRequirement {
 		result = append(result, seen[key])
 	}
 	return result
+}
+
+func inferredSkillTools(requirement Requirement) []string {
+	if requirement.Category != "tool" {
+		return nil
+	}
+	return []string{requirement.Description}
 }
 
 func summarizeDocuments(documents []ParsedDocument) string {
