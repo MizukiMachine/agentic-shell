@@ -105,8 +105,9 @@ func (c *SkillCache) ScanSkills(dir string) ([]SkillFile, error) {
 // or, for compatibility, from a YAML-only skill file.
 func ParseSkillMetadata(data []byte) (SkillMeta, error) {
 	var meta SkillMeta
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 
-	frontMatter, ok := extractFrontMatter(string(data))
+	frontMatter, ok := extractFrontMatter(text)
 	if ok {
 		if err := yaml.Unmarshal([]byte(frontMatter), &meta); err != nil {
 			return SkillMeta{}, err
@@ -116,9 +117,11 @@ func ParseSkillMetadata(data []byte) (SkillMeta, error) {
 
 	if err := yaml.Unmarshal(data, &meta); err == nil {
 		return normalizeSkillMeta(meta), nil
+	} else if looksLikeMarkdown(text) {
+		return SkillMeta{}, nil
+	} else {
+		return SkillMeta{}, err
 	}
-
-	return SkillMeta{}, nil
 }
 
 func (c *SkillCache) get(path string, modTime time.Time) (SkillFile, bool) {
@@ -167,6 +170,17 @@ func parseSkillFile(rootDir, path string) (SkillFile, error) {
 		return SkillFile{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 
+	if isMarkdownPath(path) {
+		lines := strings.Split(markdownBody(string(data)), "\n")
+		if strings.TrimSpace(meta.Name) == "" {
+			meta.Name = firstMarkdownHeading(lines, 1)
+		}
+		if strings.TrimSpace(meta.Description) == "" {
+			meta.Description = firstParagraph(lines)
+		}
+		meta = normalizeSkillMeta(meta)
+	}
+
 	relative, err := filepath.Rel(rootDir, path)
 	if err != nil {
 		relative = path
@@ -207,6 +221,22 @@ func extractFrontMatter(text string) (string, bool) {
 		return strings.TrimSuffix(rest, "\n---"), true
 	}
 	return "", false
+}
+
+func markdownBody(text string) string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	if !strings.HasPrefix(normalized, "---\n") {
+		return normalized
+	}
+
+	rest := normalized[4:]
+	if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
+		return rest[idx+5:]
+	}
+	if strings.HasSuffix(rest, "\n---") {
+		return ""
+	}
+	return normalized
 }
 
 func fallbackSkillName(relativePath string) string {
@@ -250,6 +280,70 @@ func isSkillFile(rootDir, path string) bool {
 
 func trimExtension(path string) string {
 	return strings.TrimSuffix(path, filepath.Ext(path))
+}
+
+func isMarkdownPath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".md" || ext == ".markdown"
+}
+
+func looksLikeMarkdown(text string) bool {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		level := headingLevel(trimmed)
+		if level > 0 && len(trimmed) > level && trimmed[level] == ' ' {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMarkdownHeading(lines []string, level int) string {
+	prefix := strings.Repeat("#", level) + " "
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		}
+	}
+	return ""
+}
+
+func firstParagraph(lines []string) string {
+	var builder strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if builder.Len() > 0 {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(trimmed)
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func headingLevel(line string) int {
+	level := 0
+	for _, r := range line {
+		if r == '#' {
+			level++
+			continue
+		}
+		break
+	}
+	return level
 }
 
 func uniqueStrings(values []string) []string {

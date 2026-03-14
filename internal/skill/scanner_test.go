@@ -42,6 +42,50 @@ tags:
 	}
 }
 
+func TestParseSkillMetadataBrokenYAMLReturnsError(t *testing.T) {
+	_, err := ParseSkillMetadata([]byte(strings.TrimSpace(`
+name: broken
+category: development
+tools:
+  - cargo test
+description: [missing
+`)))
+	if err == nil {
+		t.Fatal("expected broken YAML to return an error")
+	}
+}
+
+func TestParseSkillFileMarkdownFallbackExtractsTitleAndSummary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy-skill", "SKILL.md")
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(`
+# Legacy Markdown Skill
+
+Supports legacy skills without front matter.
+
+## Details
+- Keep compatibility
+`)), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	skill, err := parseSkillFile(dir, path)
+	if err != nil {
+		t.Fatalf("parseSkillFile() error = %v", err)
+	}
+
+	if skill.Metadata.Name != "Legacy Markdown Skill" {
+		t.Fatalf("expected markdown heading fallback, got %q", skill.Metadata.Name)
+	}
+	if skill.Metadata.Description != "Supports legacy skills without front matter." {
+		t.Fatalf("expected first paragraph fallback, got %q", skill.Metadata.Description)
+	}
+}
+
 func TestScanSkillsFindsMarkdownAndCustomSkillFiles(t *testing.T) {
 	dir := t.TempDir()
 

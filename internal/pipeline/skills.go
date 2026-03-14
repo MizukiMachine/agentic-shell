@@ -63,7 +63,9 @@ func MatchSkills(env *Envelope) error {
 
 		reqMeta := skillpkg.SkillMeta{
 			Name:        requirement.Name,
+			Category:    requirement.Category,
 			Description: requirement.Description,
+			Tools:       append([]string{}, requirement.Tools...),
 			Tags:        append([]string{}, requirement.Keywords...),
 		}
 
