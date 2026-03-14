@@ -109,10 +109,136 @@ Build a CLI workflow for code review and security validation.
 	if len(env.SkillGen.Files) == 0 {
 		t.Fatal("expected placeholder skill files for missing coverage")
 	}
-	if err := WriteGeneratedFiles(env, dir, true); err != nil {
+	if err := WriteGeneratedFiles(env, dir, filepath.Join(".claude", "skills"), true); err != nil {
 		t.Fatalf("WriteGeneratedFiles() error = %v", err)
 	}
 	if len(env.Output.WrittenFiles) == 0 {
 		t.Fatal("expected generated files to be written")
+	}
+}
+
+func TestWriteGeneratedFilesRespectsSkillsDir(t *testing.T) {
+	dir := t.TempDir()
+	env := &Envelope{
+		Match: &MatchResult{
+			MissingSkills: []SkillRequirement{
+				{
+					ID:          "req-1",
+					Name:        "security audit",
+					Description: "Review security-sensitive code paths",
+					Required:    true,
+				},
+			},
+		},
+	}
+
+	if err := GenerateMissingSkills(env); err != nil {
+		t.Fatalf("GenerateMissingSkills() error = %v", err)
+	}
+
+	skillsDir := filepath.Join("custom", "skills")
+	if err := WriteGeneratedFiles(env, dir, skillsDir, true); err != nil {
+		t.Fatalf("WriteGeneratedFiles() error = %v", err)
+	}
+
+	expectedPath := filepath.Join(dir, skillsDir, "security-audit", "SKILL.md")
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Fatalf("expected generated file at custom skills dir: %v", err)
+	}
+
+	defaultPath := filepath.Join(dir, ".claude", "skills", "security-audit", "SKILL.md")
+	if _, err := os.Stat(defaultPath); !os.IsNotExist(err) {
+		t.Fatalf("expected default skills path to remain unused, stat err = %v", err)
+	}
+}
+
+func TestRenderSkillPlaceholderEscapesYAMLFrontMatter(t *testing.T) {
+	content, err := renderSkillPlaceholder(SkillRequirement{
+		ID:          "req-quoted",
+		Name:        `review "quotes"`,
+		Description: "Handle quoted names safely",
+		Required:    true,
+	})
+	if err != nil {
+		t.Fatalf("renderSkillPlaceholder() error = %v", err)
+	}
+
+	doc, err := ParseDocument("SKILL.md", []byte(content), "markdown")
+	if err != nil {
+		t.Fatalf("ParseDocument() error = %v", err)
+	}
+
+	if got := stringValue(doc.Metadata["name"]); got != `review "quotes"` {
+		t.Fatalf("expected quoted skill name to round-trip, got %q", got)
+	}
+}
+
+func TestScanSkillsExcludesReadmeAndNonSkillMarkdown(t *testing.T) {
+	dir := t.TempDir()
+
+	files := map[string]string{
+		"README.md": strings.TrimSpace(`
+---
+name: "root-readme"
+description: "must be ignored"
+---
+`),
+		"code-review/SKILL.md": strings.TrimSpace(`
+---
+name: "code-review"
+description: "Primary skill file"
+---
+`),
+		"security/security.md": strings.TrimSpace(`
+---
+name: "security"
+description: "Skill file named after its directory"
+---
+`),
+		"docs/README.md": strings.TrimSpace(`
+---
+name: "nested-readme"
+description: "must be ignored"
+---
+`),
+		"docs/notes.md": strings.TrimSpace(`
+---
+name: "notes"
+description: "must be ignored"
+---
+`),
+		"flow.skill": strings.TrimSpace(`
+name: flow
+description: custom skill extension
+`),
+	}
+
+	for relativePath, content := range files {
+		fullPath := filepath.Join(dir, filepath.FromSlash(relativePath))
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("failed to create parent dir for %s: %v", relativePath, err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content+"\n"), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", relativePath, err)
+		}
+	}
+
+	env := &Envelope{}
+	if err := ScanSkills(env, dir); err != nil {
+		t.Fatalf("ScanSkills() error = %v", err)
+	}
+
+	paths := make([]string, 0, len(env.SkillScan.Skills))
+	for _, skill := range env.SkillScan.Skills {
+		paths = append(paths, skill.Path)
+	}
+
+	expected := []string{
+		"code-review/SKILL.md",
+		"flow.skill",
+		"security/security.md",
+	}
+	if strings.Join(paths, ",") != strings.Join(expected, ",") {
+		t.Fatalf("unexpected scanned skill paths: got %v want %v", paths, expected)
 	}
 }

@@ -43,7 +43,7 @@ func runOutput(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("output エラー: %w", err)
 	}
 
-	if err := pipeline.WriteGeneratedFiles(env, GetOutputDir(), GetConfig().Output.Overwrite); err != nil {
+	if err := pipeline.WriteGeneratedFiles(env, GetOutputDir(), outputSkillsDir, GetConfig().Output.Overwrite); err != nil {
 		return fmt.Errorf("ファイル出力エラー: %w", err)
 	}
 
