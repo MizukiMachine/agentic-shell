@@ -27,6 +27,8 @@ type Loader struct {
 	configPath string
 	envPrefix  string
 	usedFile   string
+	profile    string
+	overrides  *ConfigOverrides
 }
 
 // NewLoader は新しい Loader を作成します
@@ -60,6 +62,18 @@ func (l *Loader) WithConfigPath(path string) *Loader {
 // WithEnvPrefix は環境変数プレフィックスを設定します
 func (l *Loader) WithEnvPrefix(prefix string) *Loader {
 	l.envPrefix = prefix
+	return l
+}
+
+// WithProfile は読み込み時に適用するプロファイル名を設定します。
+func (l *Loader) WithProfile(profile string) *Loader {
+	l.profile = profile
+	return l
+}
+
+// WithCLIOverrides は CLI フラグ由来の上書きを設定します。
+func (l *Loader) WithCLIOverrides(overrides *ConfigOverrides) *Loader {
+	l.overrides = overrides
 	return l
 }
 
@@ -110,6 +124,30 @@ func (l *Loader) Load() (*Config, error) {
 
 	// デフォルト設定とマージ
 	config.Merge(loadOverrides(v))
+
+	activeProfile := strings.TrimSpace(l.profile)
+	if activeProfile == "" && v.IsSet("profile") {
+		activeProfile = v.GetString("profile")
+	}
+
+	profileManager := NewProfileManager()
+	if v.IsSet("profiles") {
+		customProfiles := map[string]Profile{}
+		if err := v.UnmarshalKey("profiles", &customProfiles); err != nil {
+			return nil, fmt.Errorf("failed to decode profiles: %w", err)
+		}
+		if err := profileManager.Load(customProfiles); err != nil {
+			return nil, fmt.Errorf("failed to load profiles: %w", err)
+		}
+	}
+	if err := profileManager.Switch(activeProfile); err != nil {
+		return nil, err
+	}
+
+	config, err := profileManager.Merge(config, activeProfile, l.overrides)
+	if err != nil {
+		return nil, err
+	}
 
 	// 検証
 	if err := config.Validate(); err != nil {
@@ -202,6 +240,7 @@ func ConfigExists() (bool, error) {
 
 func bindEnvKeys(v *viper.Viper) {
 	for _, key := range []string{
+		"profile",
 		"llm.claude_path",
 		"llm.timeout",
 		"llm.max_retries",
