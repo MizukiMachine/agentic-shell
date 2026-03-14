@@ -8,15 +8,47 @@ import (
 	"strings"
 	"unicode"
 
+	specpkg "github.com/MizukiMachine/agentic-shell/internal/spec"
 	types "github.com/MizukiMachine/agentic-shell/pkg/types"
 )
 
 // Generator converts AgentSpec into a Claude Code compatible agent definition.
-type Generator struct{}
+type Generator struct {
+	defaultModel        string
+	defaultTemperature  float64
+	confidenceThreshold float64
+}
+
+// GeneratorConfig represents Generator runtime configuration.
+type GeneratorConfig struct {
+	DefaultModel        string
+	DefaultTemperature  float64
+	ConfidenceThreshold float64
+}
 
 // NewGenerator creates a Generator.
 func NewGenerator() *Generator {
-	return &Generator{}
+	return &Generator{
+		defaultModel:        "claude-sonnet-4-6",
+		defaultTemperature:  0.4,
+		confidenceThreshold: specpkg.ConfidenceThreshold,
+	}
+}
+
+// NewGeneratorWithConfig creates a Generator with runtime overrides.
+func NewGeneratorWithConfig(cfg GeneratorConfig) *Generator {
+	g := NewGenerator()
+	if cfg.DefaultModel != "" {
+		g.defaultModel = cfg.DefaultModel
+	}
+	if cfg.DefaultTemperature >= 0 && cfg.DefaultTemperature <= 1 {
+		g.defaultTemperature = cfg.DefaultTemperature
+	}
+	// 0 も有効な値として許容（quick モード等で閾値チェックを無効化する場合）
+	if cfg.ConfidenceThreshold >= 0 && cfg.ConfidenceThreshold <= 1 {
+		g.confidenceThreshold = cfg.ConfidenceThreshold
+	}
+	return g
 }
 
 // Generate converts AgentSpec into ClaudeAgentDefinition.
@@ -30,7 +62,7 @@ func (g *Generator) Generate(ctx context.Context, spec *types.AgentSpec) (*types
 	if spec == nil {
 		return nil, fmt.Errorf("spec is required")
 	}
-	if err := spec.Validate(); err != nil {
+	if err := specpkg.ValidateWithThreshold(spec, g.confidenceThreshold); err != nil {
 		return nil, fmt.Errorf("invalid agent spec: %w", err)
 	}
 
@@ -41,6 +73,8 @@ func (g *Generator) Generate(ctx context.Context, spec *types.AgentSpec) (*types
 	)
 
 	def := types.NewClaudeAgentDefinition(spec.Metadata.Name, description)
+	def.Model.ModelID = g.defaultModel
+	def.Model.Temperature = g.defaultTemperature
 	def.Metadata.Version = firstNonEmpty(spec.Metadata.Version, def.Metadata.Version)
 	def.Metadata.Author = spec.Metadata.Author
 	def.Metadata.Description = description
@@ -58,7 +92,7 @@ func (g *Generator) Generate(ctx context.Context, spec *types.AgentSpec) (*types
 	def.Prompt.Traits = inferTraits(spec)
 	def.Prompt.CommunicationStyle = inferCommunicationStyle(spec)
 
-	applyModelConfig(def, spec)
+	applyModelConfig(def, spec, g.defaultTemperature)
 	applyContextConfig(def, spec)
 	applySafetyConfig(def, spec)
 	applyOutputConfig(def, spec)
@@ -446,14 +480,14 @@ func inferCommunicationStyle(spec *types.AgentSpec) string {
 	}
 }
 
-func applyModelConfig(def *types.ClaudeAgentDefinition, spec *types.AgentSpec) {
+func applyModelConfig(def *types.ClaudeAgentDefinition, spec *types.AgentSpec, defaultTemperature float64) {
+	def.Model.Temperature = defaultTemperature
+
 	switch spec.Intent.Preferences.QualityVsSpeed.Bias {
 	case types.QualitySpeedBiasQuality:
 		def.Model.Temperature = 0.2
 	case types.QualitySpeedBiasSpeed:
 		def.Model.Temperature = 0.6
-	default:
-		def.Model.Temperature = 0.4
 	}
 
 	if spec.Intent.Modality.Text != nil && spec.Intent.Modality.Text.Tone == types.TextToneCasual {

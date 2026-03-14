@@ -1,96 +1,161 @@
 # agentic-shell
 
-AIエージェント統合シェル - 複数のAIエージェントを統合管理するターミナルベースのシェルアプリケーション
+`agentic-shell` は、自然言語の要望からエージェント仕様を収集し、Claude Code 互換のエージェント定義 Markdown を生成する Go 製 CLI です。
 
-## 概要
+現在の実装で主に使うコマンドは次の 2 つです。
 
-`agentic-shell` は、Claude、GPT、Gemini などの AI エージェントと対話しながら開発作業を効率化するための CLI ツールです。
+- `spec-gather`: Step-back 質問で要件を収集し、`AgentSpec` を YAML/JSON に出力
+- `generate`: `AgentSpec` から `.claude/agents/*.md` を生成
 
-## 機能
-
-- 複数AIエージェントの統合管理
-- ターミナルベースのユーザーインターフェース
-- 設定ファイルによるカスタマイズ
-- 拡張可能なエージェントアーキテクチャ
+詳細な構造は [ARCHITECTURE.md](./ARCHITECTURE.md) を参照してください。
 
 ## インストール
 
-### ソースからのビルド
+### 1. ソースからビルド
 
 ```bash
-# リポジトリをクローン
 git clone https://github.com/MizukiMachine/agentic-shell.git
 cd agentic-shell
-
-# 依存パッケージをインストール
-make deps
-
-# ビルド
-make build
+go build -o agentic-shell ./cmd/agentic-shell
 ```
 
-### Go install を使用
+### 2. `go install`
 
 ```bash
 go install github.com/MizukiMachine/agentic-shell/cmd/agentic-shell@latest
 ```
 
-## 使用方法
-
-### 基本的な使い方
+### 3. Makefile を使う
 
 ```bash
-# ヘルプを表示
-agentic-shell --help
-
-# バージョンを表示
-agentic-shell version
+make build
 ```
+
+生成物は `bin/agentic-shell` に出力されます。
+
+## 使用例
+
+### 1. 仕様ファイルを作る
+
+`spec.yaml` をカレントディレクトリに出したい場合は、`--output-dir .` を付けます。
+
+```bash
+./agentic-shell --output-dir . spec-gather --quick --output spec.yaml "code review agent"
+```
+
+### 2. 仕様ファイルからエージェントを生成する
+
+```bash
+./agentic-shell --output-dir . generate --from spec.yaml
+```
+
+生成先は `./.claude/agents/<agent-name>.md` です。
+
+### 3. 1 回で仕様収集から生成まで進める
+
+```bash
+./agentic-shell generate "code review agent"
+```
+
+### 4. バージョン確認
+
+```bash
+./agentic-shell version
+```
+
+## 設定方法
+
+設定は次の優先順で反映されます。
+
+1. CLI フラグ
+2. 環境変数
+3. 設定ファイル
+4. デフォルト値
+
+### 設定ファイル
+
+デフォルトでは `.agentic-shell.yaml` を探索します。明示的に指定する場合は `--config` を使います。
+
+```bash
+./agentic-shell --config ./agentic-shell.yaml --output-dir . spec-gather --output spec.yaml "documentation agent"
+```
+
+設定例:
+
+```yaml
+llm:
+  claude_path: "claude"
+  timeout: "2m"
+  max_retries: 3
+
+output:
+  directory: ".claude/agents"
+  format: "markdown"
+  overwrite: false
+
+gathering:
+  confidence_threshold: 0.85
+  max_question_rounds: 5
+
+generation:
+  default_model: "claude-sonnet-4-6"
+  default_temperature: 0.7
+```
+
+### 環境変数
+
+プレフィックスは `AGENTIC_` です。例:
+
+```bash
+export AGENTIC_OUTPUT_DIRECTORY=.
+export AGENTIC_OUTPUT_OVERWRITE=true
+export AGENTIC_GATHERING_CONFIDENCE_THRESHOLD=0.85
+export AGENTIC_GENERATION_DEFAULT_MODEL=claude-sonnet-4-6
+```
+
+主なキー:
+
+- `AGENTIC_LLM_CLAUDE_PATH`
+- `AGENTIC_LLM_TIMEOUT`
+- `AGENTIC_OUTPUT_DIRECTORY`
+- `AGENTIC_OUTPUT_OVERWRITE`
+- `AGENTIC_GATHERING_CONFIDENCE_THRESHOLD`
+- `AGENTIC_GATHERING_MAX_QUESTION_ROUNDS`
+- `AGENTIC_GENERATION_DEFAULT_MODEL`
+- `AGENTIC_GENERATION_DEFAULT_TEMPERATURE`
+
+## テスト
+
+通常のテスト:
+
+```bash
+go test ./...
+```
+
+`cmd/agentic-shell` には実バイナリをビルドして実行する E2E テストが含まれています。現在のシナリオは次の 2 つです。
+
+- `spec-gather --quick` で `spec.yaml` を出力できる
+- `generate --from spec.yaml` で `.claude/agents/*.md` を生成できる
 
 ## 開発
 
-### 必要なツール
+主なコマンド:
 
-- Go 1.21 以上
-- Make
-
-### Make コマンド
-
-| コマンド | 説明 |
-|---------|------|
-| `make build` | 本番用ビルド |
-| `make dev` | 開発用ビルド |
-| `make test` | テスト実行 |
-| `make coverage` | テストカバレッジ |
-| `make lint` | 静的解析 |
-| `make fmt` | フォーマット |
-| `make clean` | クリーンアップ |
+- `make build`
+- `make test`
+- `make coverage`
+- `make fmt`
+- `make lint`
 
 ## プロジェクト構造
 
-```
+```text
 agentic-shell/
-├── cmd/
-│   └── agentic-shell/    # CLI エントリーポイント
-│       └── main.go
-├── internal/
-│   ├── config/           # 設定管理
-│   ├── agent/            # エージェント実装
-│   └── tui/              # ターミナルUI
-├── pkg/                  # 公開パッケージ
-├── Makefile
-├── go.mod
-└── README.md
+├── cmd/agentic-shell/   # CLI エントリーポイントと E2E テスト
+├── internal/cli/        # Cobra コマンド実装
+├── internal/spec/       # 仕様収集と検証
+├── internal/agent/      # エージェント定義生成
+├── internal/config/     # 設定ロード
+├── pkg/types/           # AgentSpec / IntentSpace / ClaudeAgentDefinition
+└── docs/diagrams/       # 補助資料の図
 ```
-
-## ライセンス
-
-MIT License
-
-## 貢献
-
-プルリクエストや Issue は歓迎します。
-
-## 作者
-
-MizukiMachine

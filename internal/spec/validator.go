@@ -7,6 +7,11 @@ import (
 
 // Validate は AgentSpec 全体を検証し、算出した信頼度を Metadata に反映します。
 func Validate(spec *AgentSpec) error {
+	return ValidateWithThreshold(spec, ConfidenceThreshold)
+}
+
+// ValidateWithThreshold は AgentSpec 全体を検証し、算出した信頼度を Metadata に反映します。
+func ValidateWithThreshold(spec *AgentSpec, threshold float64) error {
 	if err := ValidateRequiredFields(spec); err != nil {
 		return err
 	}
@@ -15,7 +20,7 @@ func Validate(spec *AgentSpec) error {
 	}
 	confidence := calculateConfidence(spec)
 	spec.Intent.Metadata.Confidence = confidence
-	if err := ValidateConfidence(confidence); err != nil {
+	if err := ValidateConfidenceWithThreshold(confidence, threshold); err != nil {
 		return err
 	}
 	return nil
@@ -57,11 +62,16 @@ func ValidateRequiredFields(spec *AgentSpec) error {
 
 // ValidateConfidence は信頼度が許容範囲かつ閾値以上かを検証します。
 func ValidateConfidence(confidence float64) error {
+	return ValidateConfidenceWithThreshold(confidence, ConfidenceThreshold)
+}
+
+// ValidateConfidenceWithThreshold は信頼度が許容範囲かつ指定閾値以上かを検証します。
+func ValidateConfidenceWithThreshold(confidence, threshold float64) error {
 	switch {
 	case confidence < 0 || confidence > 1:
 		return fmt.Errorf("confidence must be between 0 and 1, got %.2f", confidence)
-	case confidence < ConfidenceThreshold:
-		return fmt.Errorf("confidence %.2f is below threshold %.2f", confidence, ConfidenceThreshold)
+	case confidence < threshold:
+		return fmt.Errorf("confidence %.2f is below threshold %.2f", confidence, threshold)
 	default:
 		return nil
 	}

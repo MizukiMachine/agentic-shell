@@ -20,12 +20,13 @@ type AgentSpec = types.AgentSpec
 
 // Gatherer は対話入力から AgentSpec を段階的に構築します。
 type Gatherer struct {
-	input      io.Reader
-	reader     *bufio.Reader
-	output     io.Writer
-	calculator *ConfidenceCalculator
-	maxRounds  int
-	now        func() time.Time
+	input               io.Reader
+	reader              *bufio.Reader
+	output              io.Writer
+	calculator          *ConfidenceCalculator
+	maxRounds           int
+	confidenceThreshold float64
+	now                 func() time.Time
 }
 
 // NewGatherer は対話収集に使う Gatherer を生成します。
@@ -36,13 +37,24 @@ func NewGatherer(input io.Reader, output io.Writer) *Gatherer {
 	}
 
 	return &Gatherer{
-		input:      input,
-		reader:     reader,
-		output:     output,
-		calculator: &ConfidenceCalculator{},
-		maxRounds:  maxGatherRounds,
-		now:        time.Now,
+		input:               input,
+		reader:              reader,
+		output:              output,
+		calculator:          &ConfidenceCalculator{},
+		maxRounds:           maxGatherRounds,
+		confidenceThreshold: ConfidenceThreshold,
+		now:                 time.Now,
 	}
+}
+
+// SetMaxRounds は最大質問ラウンド数を設定します。
+func (g *Gatherer) SetMaxRounds(maxRounds int) {
+	g.maxRounds = maxRounds
+}
+
+// SetConfidenceThreshold は採用信頼度の閾値を設定します。
+func (g *Gatherer) SetConfidenceThreshold(threshold float64) {
+	g.confidenceThreshold = threshold
 }
 
 // GatherInteractive は質問と回答を通じて AgentSpec を補完します。
@@ -65,9 +77,9 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 	for round := 0; round < roundLimit; round++ {
 		confidence := g.calculator.Calculate(spec)
 		spec.Intent.Metadata.Confidence = confidence
-		if confidence >= ConfidenceThreshold {
-			if err := Validate(spec); err != nil {
-				return nil, err
+		if confidence >= g.confidenceThreshold {
+			if err := ValidateWithThreshold(spec, g.confidenceThreshold); err != nil {
+				return spec, err
 			}
 			return spec, nil
 		}
@@ -93,8 +105,8 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 	}
 
 	spec.Intent.Metadata.Confidence = g.calculator.Calculate(spec)
-	if err := Validate(spec); err != nil {
-		return nil, err
+	if err := ValidateWithThreshold(spec, g.confidenceThreshold); err != nil {
+		return spec, err
 	}
 
 	return spec, nil
@@ -137,8 +149,11 @@ func (g *Gatherer) ensureDefaults() {
 	if g.calculator == nil {
 		g.calculator = &ConfidenceCalculator{}
 	}
-	if g.maxRounds <= 0 || g.maxRounds > maxGatherRounds {
+	if g.maxRounds <= 0 {
 		g.maxRounds = maxGatherRounds
+	}
+	if g.confidenceThreshold <= 0 || g.confidenceThreshold > 1 {
+		g.confidenceThreshold = ConfidenceThreshold
 	}
 	if g.now == nil {
 		g.now = time.Now

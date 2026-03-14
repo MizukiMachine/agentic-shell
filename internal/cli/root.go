@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"os"
 
+	appconfig "github.com/MizukiMachine/agentic-shell/internal/config"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // グローバルフラグの変数
 var (
-	cfgFile string
+	cfgFile        string
+	currentConfig  = appconfig.LoadWithDefaults()
+	currentVerbose bool
+	initConfigErr  error
+	configFileUsed string
 )
 
 // バージョン情報（ビルド時に設定可能）
@@ -39,6 +43,13 @@ Claude、GPT、Gemini などの AI エージェントと対話しながら
 		// デフォルトの動作: ヘルプを表示
 		cmd.Help()
 	},
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// help と version コマンドは設定エラーでも動作させる
+		if cmd.Name() == "help" || cmd.Name() == "version" {
+			return nil
+		}
+		return initConfigErr
+	},
 }
 
 // Execute はCLIアプリケーションを実行します
@@ -46,49 +57,49 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-// init はパッケージ初期化時にフラグとViperを設定します
+// init はパッケージ初期化時にフラグと設定初期化フックを登録します
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(func() {
+		initConfigErr = initConfig()
+	})
 
 	// グローバルフラグ
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "設定ファイル (デフォルト: $HOME/.agentic-shell.yaml)")
-	rootCmd.PersistentFlags().StringP("output-dir", "o", ".", "出力ディレクトリ")
+	rootCmd.PersistentFlags().StringP("output-dir", "o", "", "出力ディレクトリ (設定値を上書き)")
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "詳細出力モード")
-
-	// Viperにフラグをバインド
-	viper.BindPFlag("output-dir", rootCmd.PersistentFlags().Lookup("output-dir"))
-	viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
-
-	// デフォルト値を設定
-	viper.SetDefault("output-dir", ".")
-	viper.SetDefault("verbose", false)
 }
 
 // initConfig は設定ファイルと環境変数を読み込みます
-func initConfig() {
+func initConfig() error {
+	loader := appconfig.NewLoader()
+
 	if cfgFile != "" {
-		// 指定された設定ファイルを使用
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// ホームディレクトリを検索
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		// 設定ファイルの検索パスを追加
-		viper.AddConfigPath(home)
-		viper.AddConfigPath(".")
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".agentic-shell")
+		loader.WithConfigPath(cfgFile)
 	}
 
-	// 環境変数を読み込み
-	viper.SetEnvPrefix("AGENTIC")
-	viper.AutomaticEnv()
-
-	// 設定ファイルを読み込み（存在する場合）
-	if err := viper.ReadInConfig(); err == nil && viper.GetBool("verbose") {
-		fmt.Fprintln(os.Stderr, "設定ファイルを使用:", viper.ConfigFileUsed())
+	cfg, err := loader.Load()
+	if err != nil {
+		return err
 	}
+
+	currentConfig = cfg
+	configFileUsed = loader.ConfigFileUsed()
+
+	if flag := rootCmd.PersistentFlags().Lookup("output-dir"); flag != nil && flag.Changed {
+		currentConfig.Output.Directory = flag.Value.String()
+	}
+
+	verbose, err := rootCmd.PersistentFlags().GetBool("verbose")
+	if err != nil {
+		return err
+	}
+	currentVerbose = verbose
+
+	if currentVerbose && configFileUsed != "" {
+		fmt.Fprintln(os.Stderr, "設定ファイルを使用:", configFileUsed)
+	}
+
+	return nil
 }
 
 // GetRootCmd はルートコマンドを返します（テスト用）
@@ -96,12 +107,17 @@ func GetRootCmd() *cobra.Command {
 	return rootCmd
 }
 
-// GetVerbose は詳細モードの状態を返します（Viperから取得）
+// GetVerbose は詳細モードの状態を返します。
 func GetVerbose() bool {
-	return viper.GetBool("verbose")
+	return currentVerbose
 }
 
-// GetOutputDir は出力ディレクトリを返します（Viperから取得）
+// GetOutputDir は出力ディレクトリを返します。
 func GetOutputDir() string {
-	return viper.GetString("output-dir")
+	return currentConfig.Output.Directory
+}
+
+// GetConfig はロード済みの設定を返します。
+func GetConfig() *appconfig.Config {
+	return currentConfig
 }

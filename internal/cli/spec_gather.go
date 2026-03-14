@@ -10,7 +10,6 @@ import (
 
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,28 +52,37 @@ func init() {
 	// フラグ設定
 	specGatherCmd.Flags().StringVar(&specOutput, "output", "", "出力ファイルパス (指定しない場合は標準出力)")
 	specGatherCmd.Flags().BoolVarP(&specQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
-	specGatherCmd.Flags().IntVarP(&specTimeout, "timeout", "t", 300, "タイムアウト（秒）")
+	specGatherCmd.Flags().IntVarP(&specTimeout, "timeout", "t", 300, "タイムアウト（秒、指定時のみ設定値を上書き）")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
 func runSpecGather(cmd *cobra.Command, args []string) error {
-	// Viperから設定値を取得（設定ファイル・環境変数を反映）
-	outputDir := viper.GetString("output-dir")
-	verbose := viper.GetBool("verbose")
+	cfg := GetConfig()
+	outputDir := cfg.Output.Directory
+	verbose := GetVerbose()
 
 	input := args[0]
 
+	timeout := time.Duration(specTimeout) * time.Second
+	if !cmd.Flags().Changed("timeout") {
+		if cfgTimeout, err := cfg.LLM.GetTimeout(); err == nil {
+			timeout = cfgTimeout
+		}
+	}
+
 	// コンテキストにタイムアウトを設定
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(specTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// Gathererを作成
 	gatherer := spec.NewGatherer(os.Stdin, os.Stderr)
+	gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
+	gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "入力: %s\n", input)
-		fmt.Fprintf(os.Stderr, "タイムアウト: %d秒\n", specTimeout)
+		fmt.Fprintf(os.Stderr, "タイムアウト: %s\n", timeout)
 		if specQuick {
 			fmt.Fprintf(os.Stderr, "クイックモード: 有効\n")
 		}
@@ -96,13 +104,20 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	}
 
 	// クイックモードの場合、低信頼度でも警告のみ
-	if specQuick && agentSpec.Intent.Metadata.Confidence < spec.ConfidenceThreshold {
+	if specQuick && agentSpec.Intent.Metadata.Confidence < cfg.Gathering.ConfidenceThreshold {
 		fmt.Fprintf(os.Stderr, "⚠️ クイックモード: 信頼度 %.2f は閾値 %.2f 未満です\n",
-			agentSpec.Intent.Metadata.Confidence, spec.ConfidenceThreshold)
+			agentSpec.Intent.Metadata.Confidence, cfg.Gathering.ConfidenceThreshold)
 	}
 
-	// 出力形式を決定
+	// 出力形式を決定（優先順位: --format > 拡張子 > 設定ファイル > デフォルト）
 	format := specFormat
+	if !cmd.Flags().Changed("format") {
+		// --format が指定されていない場合、設定ファイルの値を確認
+		if cfg.Output.Format != "" {
+			format = cfg.Output.Format
+		}
+	}
+	// ファイル拡張子が明示的な場合はそれを優先
 	if specOutput != "" {
 		ext := filepath.Ext(specOutput)
 		if ext == ".json" {

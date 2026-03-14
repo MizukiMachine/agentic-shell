@@ -13,7 +13,6 @@ import (
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/MizukiMachine/agentic-shell/pkg/types"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
 
@@ -53,16 +52,23 @@ func init() {
 	// フラグ設定
 	generateCmd.Flags().StringVarP(&genFrom, "from", "f", "", "入力仕様ファイル (指定しない場合はspec-gatherを実行)")
 	generateCmd.Flags().BoolVarP(&genQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
-	generateCmd.Flags().IntVarP(&genTimeout, "timeout", "t", 300, "タイムアウト（秒）")
+	generateCmd.Flags().IntVarP(&genTimeout, "timeout", "t", 300, "タイムアウト（秒、指定時のみ設定値を上書き）")
 }
 
 // runGenerate はgenerateコマンドのメイン処理です
 func runGenerate(cmd *cobra.Command, args []string) error {
-	// Viperから設定値を取得（設定ファイル・環境変数を反映）
-	outputDir := viper.GetString("output-dir")
-	verbose := viper.GetBool("verbose")
+	cfg := GetConfig()
+	outputDir := cfg.Output.Directory
+	verbose := GetVerbose()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(genTimeout)*time.Second)
+	timeout := time.Duration(genTimeout) * time.Second
+	if !cmd.Flags().Changed("timeout") {
+		if cfgTimeout, err := cfg.LLM.GetTimeout(); err == nil {
+			timeout = cfgTimeout
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	var agentSpec *spec.AgentSpec
@@ -86,6 +92,8 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		// spec-gatherを実行
 		input := args[0]
 		gatherer := spec.NewGatherer(os.Stdin, os.Stderr)
+		gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
+		gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
 
 		if verbose {
 			fmt.Fprintf(os.Stderr, "仕様収集中: %s\n", input)
@@ -111,7 +119,11 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	generator := agent.NewGenerator()
+	generator := agent.NewGeneratorWithConfig(agent.GeneratorConfig{
+		DefaultModel:        cfg.Generation.DefaultModel,
+		DefaultTemperature:  cfg.Generation.DefaultTemperature,
+		ConfidenceThreshold: cfg.Gathering.ConfidenceThreshold,
+	})
 	claudeDef, err := generator.Generate(ctx, agentSpec)
 	if err != nil {
 		return fmt.Errorf("エージェント定義生成エラー: %w", err)
@@ -124,7 +136,7 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 
 	// エージェント定義ファイルを生成
 	outputPath := buildAgentOutputPath(outputDir, claudeDef.Metadata.Name)
-	if err := writeClaudeAgentMarkdown(markdown, outputPath); err != nil {
+	if err := writeClaudeAgentMarkdown(markdown, outputPath, cfg.Output.Overwrite); err != nil {
 		return fmt.Errorf("エージェント定義出力エラー: %w", err)
 	}
 
@@ -162,13 +174,21 @@ func loadSpecFromFile(path string) (*spec.AgentSpec, error) {
 	return agentSpec, nil
 }
 
-// writeClaudeAgentMarkdown はClaude Code互換のMarkdownファイルを書き込みます
-func writeClaudeAgentMarkdown(markdown, path string) error {
+// writeClaudeAgentMarkdown はClaude Code互換のMarkdownファイルを書き込みます。
+func writeClaudeAgentMarkdown(markdown, path string, overwrite bool) error {
 	// 親ディレクトリを作成
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("親ディレクトリ作成エラー: %w", err)
+		}
+	}
+
+	if !overwrite {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("file already exists and output.overwrite=false: %s", path)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to check output file: %w", err)
 		}
 	}
 
