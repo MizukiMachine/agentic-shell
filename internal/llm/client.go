@@ -14,9 +14,9 @@ import (
 
 // ClaudeClient はClaude CLIをsubprocessで呼び出すクライアントです
 type ClaudeClient struct {
-	timeout   time.Duration
-	cliPath   string // Claude CLIのパス（デフォルト: "claude"）
-	cliArgs   []string
+	timeout time.Duration
+	cliPath string // Claude CLIのパス（デフォルト: "claude"）
+	cliArgs []string
 }
 
 // ClientOption はClaudeClientのオプション設定です
@@ -171,13 +171,16 @@ func (c *ClaudeClient) GetTimeout() time.Duration {
 	return c.timeout
 }
 
-// Client はLLMクライアントのインターフェースです（モックテスト用）
-type Client interface {
+// LLMClient はLLMクライアントの拡張ポイントです。
+type LLMClient interface {
 	Execute(ctx context.Context, prompt string) (string, error)
 	ExecuteJSON(ctx context.Context, prompt string, target interface{}) error
 	SetTimeout(d time.Duration)
 	GetTimeout() time.Duration
 }
 
+// Client は後方互換のためのエイリアスです。
+type Client = LLMClient
+
 // Compile-time interface check
-var _ Client = (*ClaudeClient)(nil)
+var _ LLMClient = (*ClaudeClient)(nil)

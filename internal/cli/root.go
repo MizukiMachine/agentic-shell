@@ -11,11 +11,13 @@ import (
 
 // グローバルフラグの変数
 var (
-	cfgFile        string
-	currentConfig  = appconfig.LoadWithDefaults()
-	currentVerbose bool
-	initConfigErr  error
-	configFileUsed string
+	cfgFile           string
+	selectedProfile   string
+	selectedOutputFmt string
+	currentConfig     = appconfig.LoadWithDefaults()
+	currentVerbose    bool
+	initConfigErr     error
+	configFileUsed    string
 )
 
 // バージョン情報（ビルド時に設定可能）
@@ -65,7 +67,9 @@ func init() {
 
 	// グローバルフラグ
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "設定ファイル (デフォルト: $HOME/.agentic-shell.yaml)")
+	rootCmd.PersistentFlags().StringVar(&selectedProfile, "profile", "", "設定プロファイル名 (dev, prod, または custom)")
 	rootCmd.PersistentFlags().StringP("output-dir", "o", "", "出力ディレクトリ (設定値を上書き)")
+	rootCmd.PersistentFlags().StringVar(&selectedOutputFmt, "output-format", "", "出力形式を上書き (markdown, yaml, json)")
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "詳細出力モード")
 }
 
@@ -76,6 +80,25 @@ func initConfig() error {
 	if cfgFile != "" {
 		loader.WithConfigPath(cfgFile)
 	}
+	if selectedProfile != "" {
+		loader.WithProfile(selectedProfile)
+	}
+
+	cliOverrides := &appconfig.ConfigOverrides{}
+	hasOverrides := false
+	if flag := rootCmd.PersistentFlags().Lookup("output-dir"); flag != nil && flag.Changed {
+		value := flag.Value.String()
+		cliOverrides.Output.Directory = &value
+		hasOverrides = true
+	}
+	if flag := rootCmd.PersistentFlags().Lookup("output-format"); flag != nil && flag.Changed {
+		value := flag.Value.String()
+		cliOverrides.Output.Format = &value
+		hasOverrides = true
+	}
+	if hasOverrides {
+		loader.WithCLIOverrides(cliOverrides)
+	}
 
 	cfg, err := loader.Load()
 	if err != nil {
@@ -84,10 +107,6 @@ func initConfig() error {
 
 	currentConfig = cfg
 	configFileUsed = loader.ConfigFileUsed()
-
-	if flag := rootCmd.PersistentFlags().Lookup("output-dir"); flag != nil && flag.Changed {
-		currentConfig.Output.Directory = flag.Value.String()
-	}
 
 	verbose, err := rootCmd.PersistentFlags().GetBool("verbose")
 	if err != nil {

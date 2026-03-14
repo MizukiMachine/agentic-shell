@@ -9,9 +9,9 @@ import (
 
 // MockClient はテスト用のモッククライアントです
 type MockClient struct {
-	ExecuteFunc    func(ctx context.Context, prompt string) (string, error)
+	ExecuteFunc     func(ctx context.Context, prompt string) (string, error)
 	ExecuteJSONFunc func(ctx context.Context, prompt string, target interface{}) error
-	timeout        time.Duration
+	timeout         time.Duration
 }
 
 // NewMockClient は新しいモッククライアントを作成します
@@ -49,7 +49,7 @@ func (m *MockClient) GetTimeout() time.Duration {
 }
 
 // Compile-time interface check for MockClient
-var _ Client = (*MockClient)(nil)
+var _ LLMClient = (*MockClient)(nil)
 
 // TestNewClaudeClient tests ClaudeClient creation
 func TestNewClaudeClient(t *testing.T) {
@@ -156,14 +156,14 @@ func TestExtractJSON(t *testing.T) {
 			hasError: false,
 		},
 		{
-			name: "markdown json code block",
-			input: "```json\n{\"key\": \"value\"}\n```",
+			name:     "markdown json code block",
+			input:    "```json\n{\"key\": \"value\"}\n```",
 			expected: `{"key": "value"}`,
 			hasError: false,
 		},
 		{
-			name: "markdown generic code block with json",
-			input: "```\n{\"key\": \"value\"}\n```",
+			name:     "markdown generic code block with json",
+			input:    "```\n{\"key\": \"value\"}\n```",
 			expected: `{"key": "value"}`,
 			hasError: false,
 		},
@@ -186,20 +186,20 @@ func TestExtractJSON(t *testing.T) {
 			hasError: true,
 		},
 		{
-			name: "complex nested json",
-			input: `{"user": {"name": "test", "items": [1, 2, 3]}}`,
+			name:     "complex nested json",
+			input:    `{"user": {"name": "test", "items": [1, 2, 3]}}`,
 			expected: `{"user": {"name": "test", "items": [1, 2, 3]}}`,
 			hasError: false,
 		},
 		{
-			name: "json with whitespace",
-			input: "\n\n  {\"key\": \"value\"}  \n\n",
+			name:     "json with whitespace",
+			input:    "\n\n  {\"key\": \"value\"}  \n\n",
 			expected: `{"key": "value"}`,
 			hasError: false,
 		},
 		{
-			name: "markdown block with extra whitespace",
-			input: "```json\n\n  {\"key\": \"value\"}  \n\n```",
+			name:     "markdown block with extra whitespace",
+			input:    "```json\n\n  {\"key\": \"value\"}  \n\n```",
 			expected: `{"key": "value"}`,
 			hasError: false,
 		},
@@ -291,9 +291,18 @@ func TestMockClient(t *testing.T) {
 
 // TestClientInterface verifies the interface implementation
 func TestClientInterface(t *testing.T) {
-	// This test ensures both ClaudeClient and MockClient implement the Client interface
-	var _ Client = NewClaudeClient()
-	var _ Client = NewMockClient()
+	// This test ensures both ClaudeClient and MockClient implement the LLMClient interface.
+	var _ LLMClient = NewClaudeClient()
+	var _ LLMClient = NewMockClient()
+}
+
+func TestLLMClientUsesTimeoutMethods(t *testing.T) {
+	var client LLMClient = NewMockClient()
+	client.SetTimeout(2 * time.Minute)
+
+	if client.GetTimeout() != 2*time.Minute {
+		t.Fatalf("GetTimeout() = %v, want 2m", client.GetTimeout())
+	}
 }
 
 // TestTruncate tests the truncate helper function

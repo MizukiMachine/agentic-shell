@@ -68,6 +68,7 @@ func TestPipelineCommandsExist(t *testing.T) {
 		"skill-gen",
 		"skill-generate",
 		"output",
+		"plugin",
 	}
 
 	cmd := GetRootCmd()
@@ -109,6 +110,18 @@ func TestGlobalFlags(t *testing.T) {
 	outputDirFlag := cmd.PersistentFlags().Lookup("output-dir")
 	if outputDirFlag == nil {
 		t.Error("output-dir flag not found")
+	}
+
+	// --profile フラグの確認
+	profileFlag := cmd.PersistentFlags().Lookup("profile")
+	if profileFlag == nil {
+		t.Error("profile flag not found")
+	}
+
+	// --output-format フラグの確認
+	outputFormatFlag := cmd.PersistentFlags().Lookup("output-format")
+	if outputFormatFlag == nil {
+		t.Error("output-format flag not found")
 	}
 
 	// --verbose フラグの確認

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MizukiMachine/agentic-shell/internal/agent"
+	outputfmt "github.com/MizukiMachine/agentic-shell/internal/output"
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/MizukiMachine/agentic-shell/pkg/types"
 	"github.com/spf13/cobra"
@@ -129,14 +130,19 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("エージェント定義生成エラー: %w", err)
 	}
 
-	markdown, err := generator.RenderMarkdown(claudeDef)
+	formatter, err := outputfmt.NewFormatter(cfg.Output.Format)
 	if err != nil {
-		return fmt.Errorf("Markdownレンダリングエラー: %w", err)
+		return fmt.Errorf("出力フォーマッタ作成エラー: %w", err)
+	}
+
+	rendered, err := renderAgentDefinition(generator, formatter, claudeDef)
+	if err != nil {
+		return err
 	}
 
 	// エージェント定義ファイルを生成
-	outputPath := buildAgentOutputPath(outputDir, claudeDef.Metadata.Name)
-	if err := writeClaudeAgentMarkdown(markdown, outputPath, cfg.Output.Overwrite); err != nil {
+	outputPath := buildAgentOutputPathForFormat(outputDir, claudeDef.Metadata.Name, formatter.Name())
+	if err := writeOutputFile(rendered, outputPath, cfg.Output.Overwrite); err != nil {
 		return fmt.Errorf("エージェント定義出力エラー: %w", err)
 	}
 
@@ -174,8 +180,28 @@ func loadSpecFromFile(path string) (*spec.AgentSpec, error) {
 	return agentSpec, nil
 }
 
+func renderAgentDefinition(generator *agent.Generator, formatter outputfmt.OutputFormatter, def *types.ClaudeAgentDefinition) ([]byte, error) {
+	if formatter.Name() == "markdown" {
+		markdown, err := generator.RenderMarkdown(def)
+		if err != nil {
+			return nil, fmt.Errorf("Markdownレンダリングエラー: %w", err)
+		}
+		return formatter.Format(markdown)
+	}
+
+	data, err := formatter.Format(def)
+	if err != nil {
+		return nil, fmt.Errorf("構造化出力エラー: %w", err)
+	}
+	return data, nil
+}
+
 // writeClaudeAgentMarkdown はClaude Code互換のMarkdownファイルを書き込みます。
 func writeClaudeAgentMarkdown(markdown, path string, overwrite bool) error {
+	return writeOutputFile([]byte(markdown), path, overwrite)
+}
+
+func writeOutputFile(data []byte, path string, overwrite bool) error {
 	// 親ディレクトリを作成
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
@@ -192,11 +218,21 @@ func writeClaudeAgentMarkdown(markdown, path string, overwrite bool) error {
 		}
 	}
 
-	return os.WriteFile(path, []byte(markdown), 0644)
+	return os.WriteFile(path, data, 0644)
 }
 
 func buildAgentOutputPath(outputDir, name string) string {
+	return buildAgentOutputPathForFormat(outputDir, name, "markdown")
+}
+
+func buildAgentOutputPathForFormat(outputDir, name, format string) string {
 	filename := agent.MarkdownFileName(name) + ".md"
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "json":
+		filename = agent.MarkdownFileName(name) + ".json"
+	case "yaml":
+		filename = agent.MarkdownFileName(name) + ".yaml"
+	}
 	cleanDir := filepath.Clean(outputDir)
 	if endsWithClaudeAgents(cleanDir) {
 		return filepath.Join(cleanDir, filename)
