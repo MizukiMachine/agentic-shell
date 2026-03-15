@@ -3,6 +3,7 @@ package spec
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/MizukiMachine/agentic-shell/internal/llm"
 	types "github.com/MizukiMachine/agentic-shell/pkg/types"
 )
 
 const maxGatherRounds = 5
+const dynamicConfidenceFloor = 0.90
 
 // AgentSpec は types.AgentSpec の別名です。
 type AgentSpec = types.AgentSpec
@@ -36,10 +39,24 @@ type Gatherer struct {
 	reader              *bufio.Reader
 	output              io.Writer
 	calculator          *ConfidenceCalculator
+	interpreter         *Interpreter
 	maxRounds           int
 	confidenceThreshold float64
 	inputTimeout        time.Duration
+	useLLMQuestions     bool
 	now                 func() time.Time
+}
+
+type llmTurnError struct {
+	err error
+}
+
+func (e *llmTurnError) Error() string {
+	return e.err.Error()
+}
+
+func (e *llmTurnError) Unwrap() error {
+	return e.err
 }
 
 // NewGatherer は対話収集に使う Gatherer を生成します。
@@ -76,6 +93,25 @@ func (g *Gatherer) SetInputTimeout(timeout time.Duration) {
 	g.inputTimeout = timeout
 }
 
+// SetUseLLMQuestions は LLM による動的質問生成を有効化します。
+func (g *Gatherer) SetUseLLMQuestions(useLLM bool) {
+	g.useLLMQuestions = useLLM
+}
+
+// SetLLMClient は動的質問生成に使う LLM クライアントを設定します。
+func (g *Gatherer) SetLLMClient(client llm.Client) {
+	if client == nil {
+		g.interpreter = nil
+		return
+	}
+	g.interpreter = NewInterpreter(client)
+}
+
+// SetInterpreter はテストや差し替え用に Interpreter を設定します。
+func (g *Gatherer) SetInterpreter(interpreter *Interpreter) {
+	g.interpreter = interpreter
+}
+
 // GatherInteractive は質問と回答を通じて AgentSpec を補完します。
 func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (*AgentSpec, error) {
 	if err := ctx.Err(); err != nil {
@@ -90,14 +126,45 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 	}
 
 	spec := g.buildInitialSpec(trimmedInput)
-	questions := generateStepBackQuestions(trimmedInput)
+	threshold := g.confidenceThreshold
+	if g.useLLMQuestions {
+		threshold = maxFloat(g.confidenceThreshold, dynamicConfidenceFloor)
+		spec.Intent.Metadata.Confidence = g.calculator.Calculate(spec)
+		if spec.Intent.Metadata.Confidence >= threshold {
+			if err := ValidateWithThreshold(spec, threshold); err != nil {
+				return spec, err
+			}
+			return spec, nil
+		}
+
+		dynamicSpec, err := g.gatherDynamic(ctx, trimmedInput, spec, threshold)
+		if err == nil {
+			return dynamicSpec, nil
+		}
+
+		var llmErr *llmTurnError
+		if errors.As(err, &llmErr) {
+			if _, writeErr := fmt.Fprintf(g.output, "LLM質問生成に失敗したため固定質問にフォールバックします: %v\n", llmErr.err); writeErr != nil {
+				return nil, writeErr
+			}
+			return g.gatherStepBack(ctx, trimmedInput, spec, threshold)
+		}
+
+		return nil, err
+	}
+
+	return g.gatherStepBack(ctx, trimmedInput, spec, threshold)
+}
+
+func (g *Gatherer) gatherStepBack(ctx context.Context, initialInput string, spec *AgentSpec, threshold float64) (*AgentSpec, error) {
+	questions := generateStepBackQuestions(initialInput)
 	roundLimit := min(g.maxRounds, len(questions))
 
 	for round := 0; round < roundLimit; round++ {
 		confidence := g.calculator.Calculate(spec)
 		spec.Intent.Metadata.Confidence = confidence
-		if confidence >= g.confidenceThreshold {
-			if err := ValidateWithThreshold(spec, g.confidenceThreshold); err != nil {
+		if confidence >= threshold {
+			if err := ValidateWithThreshold(spec, threshold); err != nil {
 				return spec, err
 			}
 			return spec, nil
@@ -124,11 +191,132 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 	}
 
 	spec.Intent.Metadata.Confidence = g.calculator.Calculate(spec)
-	if err := ValidateWithThreshold(spec, g.confidenceThreshold); err != nil {
+	if err := ValidateWithThreshold(spec, threshold); err != nil {
 		return spec, err
 	}
 
 	return spec, nil
+}
+
+func (g *Gatherer) gatherDynamic(ctx context.Context, initialInput string, spec *AgentSpec, threshold float64) (*AgentSpec, error) {
+	if g.interpreter == nil {
+		return nil, &llmTurnError{err: fmt.Errorf("llm interpreter is not configured")}
+	}
+
+	state := NewConversationState(initialInput, spec)
+	state.Confidence = g.calculator.Calculate(spec)
+
+	response, err := g.interpreter.ProcessTurn(ctx, state)
+	if err != nil {
+		return nil, &llmTurnError{err: err}
+	}
+
+	for round := 0; round < g.maxRounds; round++ {
+		if state.Confidence >= threshold {
+			if err := ValidateWithThreshold(spec, threshold); err != nil {
+				return spec, err
+			}
+			return spec, nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		if err := g.displayTurnOutput(response, round+1); err != nil {
+			return nil, err
+		}
+
+		answer, err := g.readLine(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(answer) == "" {
+			continue
+		}
+
+		state.AddTurn(response.NextQuestion.Prompt, response.NextQuestion.Options, answer)
+		g.applyDynamicAnswer(spec, answer)
+		state.Confidence = g.calculator.Calculate(spec)
+		spec.Intent.Metadata.Confidence = state.Confidence
+
+		response, err = g.interpreter.ProcessTurn(ctx, state)
+		if err != nil {
+			return nil, &llmTurnError{err: err}
+		}
+	}
+
+	spec.Intent.Metadata.Confidence = g.calculator.Calculate(spec)
+	if err := ValidateWithThreshold(spec, threshold); err != nil {
+		return spec, err
+	}
+
+	return spec, nil
+}
+
+func (g *Gatherer) displayTurnOutput(response *TurnResponse, questionNumber int) error {
+	if response == nil {
+		return fmt.Errorf("turn response is required")
+	}
+
+	if _, err := fmt.Fprintln(g.output, "=== Current Understanding ==="); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(g.output, "Core Intent: %s\n", response.CurrentUnderstanding.CoreIntent); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(g.output, "Primary Goal: %s\n", response.CurrentUnderstanding.PrimaryGoal); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(g.output, "Success Criteria:"); err != nil {
+		return err
+	}
+	for _, criterion := range response.CurrentUnderstanding.SuccessCriteria {
+		if _, err := fmt.Fprintf(g.output, "  - %s\n", criterion); err != nil {
+			return err
+		}
+	}
+	if len(response.CurrentUnderstanding.SuccessCriteria) == 0 {
+		if _, err := fmt.Fprintln(g.output, "  - (none yet)"); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintln(g.output, "\n=== Suggestions ==="); err != nil {
+		return err
+	}
+	for idx, suggestion := range response.Suggestions {
+		if _, err := fmt.Fprintf(g.output, "%d. [%s] %s\n", idx+1, nonEmpty(suggestion.Category, "General"), suggestion.Title); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(g.output, "   %s\n", suggestion.Description); err != nil {
+			return err
+		}
+	}
+	if len(response.Suggestions) == 0 {
+		if _, err := fmt.Fprintln(g.output, "1. [General] No additional suggestions"); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintf(g.output, "\n=== Question [%d] ===\n", questionNumber); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(g.output, "%s\n", response.NextQuestion.Prompt); err != nil {
+		return err
+	}
+	if len(response.NextQuestion.Options) > 0 {
+		if _, err := fmt.Fprintln(g.output, "Options:"); err != nil {
+			return err
+		}
+		for idx, option := range response.NextQuestion.Options {
+			if _, err := fmt.Fprintf(g.output, "  %d. %s\n", idx+1, option); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := fmt.Fprint(g.output, "> ")
+	return err
 }
 
 func generateStepBackQuestions(input string) []string {
@@ -521,6 +709,18 @@ func (g *Gatherer) applyBroaderObjectives(spec *AgentSpec, answer string) {
 	spec.Metadata.Tags = appendUnique(spec.Metadata.Tags, extractKeywords(answer)...)
 }
 
+func (g *Gatherer) applyDynamicAnswer(spec *AgentSpec, answer string) {
+	trimmed := strings.TrimSpace(answer)
+	if trimmed == "" {
+		return
+	}
+
+	g.applyBiggerPicture(spec, trimmed)
+	g.applyPrinciples(spec, trimmed)
+	g.applyIdealSolution(spec, trimmed)
+	g.applyBroaderObjectives(spec, trimmed)
+}
+
 func inferName(input string) string {
 	words := extractASCIIWords(strings.ToLower(input))
 	if len(words) == 0 {
@@ -724,6 +924,13 @@ func tradeOffPreference(bias types.QualitySpeedBias) float64 {
 
 func min(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
 		return a
 	}
 	return b

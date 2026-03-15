@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/MizukiMachine/agentic-shell/internal/llm"
 	"github.com/MizukiMachine/agentic-shell/internal/spec"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -16,11 +17,12 @@ import (
 
 // specGatherCmd のフラグ変数
 var (
-	specOutput      string
-	specQuick       bool
+	specOutput       string
+	specQuick        bool
 	specTotalTimeout int
 	specInputTimeout int
-	specFormat      string
+	specFormat       string
+	specUseLLM       bool
 )
 
 // specGatherCmd はインタラクティブにAgentSpecを収集するコマンドです
@@ -57,6 +59,7 @@ func init() {
 	specGatherCmd.Flags().IntVarP(&specTotalTimeout, "timeout", "t", 0, "全体タイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().IntVar(&specInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
+	specGatherCmd.Flags().BoolVar(&specUseLLM, "llm", false, "LLM による動的質問生成を有効化")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
@@ -69,7 +72,7 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	var input string
 	if len(args) == 0 {
 		var err error
-		input, err = PromptForInput(inputReader, os.Stderr, "収集したい仕様を入力してください: ")
+		input, err = PromptForInput(inputReader, os.Stderr, "収集したい仕様を入力してください（例: コードレビューエージェント）: ")
 		if err != nil {
 			return fmt.Errorf("入力取得エラー: %w", err)
 		}
@@ -104,10 +107,33 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
 	gatherer.SetInputTimeout(inputTimeout)
 
+	useLLMQuestions := cfg.Gathering.UseLLMQuestions
+	if cmd.Flags().Changed("llm") {
+		useLLMQuestions = specUseLLM
+	}
+	effectiveThreshold := cfg.Gathering.ConfidenceThreshold
+	if useLLMQuestions && effectiveThreshold < 0.90 {
+		effectiveThreshold = 0.90
+	}
+	gatherer.SetUseLLMQuestions(useLLMQuestions)
+
+	if useLLMQuestions {
+		llmTimeout, err := cfg.LLM.GetTimeout()
+		if err != nil {
+			return fmt.Errorf("LLMタイムアウト設定エラー: %w", err)
+		}
+		client := llm.NewClaudeClient(
+			llm.WithCLIPath(cfg.LLM.ClaudePath),
+			llm.WithTimeout(llmTimeout),
+		)
+		gatherer.SetLLMClient(client)
+	}
+
 	if verbose {
 		fmt.Fprintf(os.Stderr, "入力: %s\n", input)
 		fmt.Fprintf(os.Stderr, "全体タイムアウト: %s\n", totalTimeout)
 		fmt.Fprintf(os.Stderr, "入力タイムアウト: %s\n", inputTimeout)
+		fmt.Fprintf(os.Stderr, "動的質問生成: %t\n", useLLMQuestions)
 		if specQuick {
 			fmt.Fprintf(os.Stderr, "クイックモード: 有効\n")
 		}
@@ -129,9 +155,9 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	}
 
 	// クイックモードの場合、低信頼度でも警告のみ
-	if specQuick && agentSpec.Intent.Metadata.Confidence < cfg.Gathering.ConfidenceThreshold {
+	if specQuick && agentSpec.Intent.Metadata.Confidence < effectiveThreshold {
 		fmt.Fprintf(os.Stderr, "⚠️ クイックモード: 信頼度 %.2f は閾値 %.2f 未満です\n",
-			agentSpec.Intent.Metadata.Confidence, cfg.Gathering.ConfidenceThreshold)
+			agentSpec.Intent.Metadata.Confidence, effectiveThreshold)
 	}
 
 	// 出力形式を決定（優先順位: --format > 拡張子 > 設定ファイル > デフォルト）

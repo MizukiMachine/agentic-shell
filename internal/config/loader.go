@@ -250,6 +250,7 @@ func bindEnvKeys(v *viper.Viper) {
 		"output.overwrite",
 		"gathering.confidence_threshold",
 		"gathering.max_question_rounds",
+		"gathering.use_llm_questions",
 		"generation.default_model",
 		"generation.default_temperature",
 		"interaction.input_timeout",
@@ -293,6 +294,10 @@ func loadOverrides(v *viper.Viper) *ConfigOverrides {
 	if v.IsSet("gathering.max_question_rounds") {
 		value := v.GetInt("gathering.max_question_rounds")
 		overrides.Gathering.MaxQuestionRounds = &value
+	}
+	if v.IsSet("gathering.use_llm_questions") {
+		value := v.GetBool("gathering.use_llm_questions")
+		overrides.Gathering.UseLLMQuestions = &value
 	}
 	if v.IsSet("generation.default_model") {
 		value := v.GetString("generation.default_model")

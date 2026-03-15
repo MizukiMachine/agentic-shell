@@ -44,6 +44,7 @@ type OutputConfigOverrides struct {
 type GatheringConfigOverrides struct {
 	ConfidenceThreshold *float64 `mapstructure:"confidence_threshold" yaml:"confidence_threshold"`
 	MaxQuestionRounds   *int     `mapstructure:"max_question_rounds" yaml:"max_question_rounds"`
+	UseLLMQuestions     *bool    `mapstructure:"use_llm_questions" yaml:"use_llm_questions"`
 }
 
 // GenerationConfigOverrides は生成設定の上書き値です。
@@ -120,6 +121,9 @@ type GatheringConfig struct {
 
 	// MaxQuestionRounds は最大質問ラウンド数です
 	MaxQuestionRounds int `mapstructure:"max_question_rounds" yaml:"max_question_rounds"`
+
+	// UseLLMQuestions は動的質問生成を有効にします
+	UseLLMQuestions bool `mapstructure:"use_llm_questions" yaml:"use_llm_questions"`
 }
 
 // Validate は GatheringConfig を検証します
@@ -214,12 +218,13 @@ func DefaultConfig() *Config {
 		},
 		Output: OutputConfig{
 			Directory: ".claude/agents",
-		Format:    "markdown",
+			Format:    "markdown",
 			Overwrite: false,
 		},
 		Gathering: GatheringConfig{
 			ConfidenceThreshold: 0.85,
 			MaxQuestionRounds:   5,
+			UseLLMQuestions:     false,
 		},
 		Generation: GenerationConfig{
 			DefaultModel:       "claude-sonnet-4-6",
@@ -261,6 +266,9 @@ func (c *Config) Merge(other *ConfigOverrides) {
 	}
 	if other.Gathering.MaxQuestionRounds != nil {
 		c.Gathering.MaxQuestionRounds = *other.Gathering.MaxQuestionRounds
+	}
+	if other.Gathering.UseLLMQuestions != nil {
+		c.Gathering.UseLLMQuestions = *other.Gathering.UseLLMQuestions
 	}
 	if other.Generation.DefaultModel != nil {
 		c.Generation.DefaultModel = *other.Generation.DefaultModel
