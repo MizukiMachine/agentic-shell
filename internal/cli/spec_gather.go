@@ -22,7 +22,7 @@ var (
 	specTotalTimeout int
 	specInputTimeout int
 	specFormat       string
-	specUseLLM       bool
+	specNoLLM        bool
 )
 
 // specGatherCmd はインタラクティブにAgentSpecを収集するコマンドです
@@ -59,7 +59,7 @@ func init() {
 	specGatherCmd.Flags().IntVarP(&specTotalTimeout, "timeout", "t", 0, "全体タイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().IntVar(&specInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
-	specGatherCmd.Flags().BoolVar(&specUseLLM, "llm", false, "LLM による動的質問生成を有効化")
+	specGatherCmd.Flags().BoolVar(&specNoLLM, "no-llm", false, "従来の固定質問モードを使用（LLM動的生成を無効化）")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
@@ -108,8 +108,8 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	gatherer.SetInputTimeout(inputTimeout)
 
 	useLLMQuestions := cfg.Gathering.UseLLMQuestions
-	if cmd.Flags().Changed("llm") {
-		useLLMQuestions = specUseLLM
+	if cmd.Flags().Changed("no-llm") {
+		useLLMQuestions = !specNoLLM
 	}
 	effectiveThreshold := cfg.Gathering.ConfidenceThreshold
 	if useLLMQuestions && effectiveThreshold < 0.90 {

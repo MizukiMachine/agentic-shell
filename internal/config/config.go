@@ -224,7 +224,7 @@ func DefaultConfig() *Config {
 		Gathering: GatheringConfig{
 			ConfidenceThreshold: 0.85,
 			MaxQuestionRounds:   5,
-			UseLLMQuestions:     false,
+			UseLLMQuestions:     true,
 		},
 		Generation: GenerationConfig{
 			DefaultModel:       "claude-sonnet-4-6",

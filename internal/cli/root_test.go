@@ -48,9 +48,9 @@ func TestSpecGatherCommandExists(t *testing.T) {
 		t.Errorf("expected command name 'spec-gather', got %s", specGatherCmd.Name())
 	}
 
-	llmFlag := specGatherCmd.Flags().Lookup("llm")
-	if llmFlag == nil {
-		t.Fatal("spec-gather llm flag not found")
+	noLLMFlag := specGatherCmd.Flags().Lookup("no-llm")
+	if noLLMFlag == nil {
+		t.Fatal("spec-gather no-llm flag not found")
 	}
 }
 
