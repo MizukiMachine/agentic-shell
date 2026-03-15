@@ -18,8 +18,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Gathering.ConfidenceThreshold != 0.85 {
 		t.Fatalf("expected default confidence threshold 0.85, got %v", cfg.Gathering.ConfidenceThreshold)
 	}
-	if cfg.Gathering.UseLLMQuestions {
-		t.Fatal("expected default use_llm_questions=false")
+	if !cfg.Gathering.UseLLMQuestions {
+		t.Fatal("expected default use_llm_questions=true")
 	}
 	if cfg.Generation.DefaultTemperature != 0.7 {
 		t.Fatalf("expected default temperature 0.7, got %v", cfg.Generation.DefaultTemperature)

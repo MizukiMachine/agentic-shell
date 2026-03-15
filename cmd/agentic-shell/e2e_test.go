@@ -25,6 +25,7 @@ func TestE2ESpecGatherQuickOutputsSpecYAML(t *testing.T) {
 		"--config", configPath,
 		"spec-gather",
 		"--quick",
+		"--no-llm",
 		"--output", "spec.yaml",
 		e2eInitialPrompt,
 	)
@@ -71,6 +72,7 @@ func TestE2EGenerateFromSpecCreatesAgentFile(t *testing.T) {
 		"--config", configPath,
 		"spec-gather",
 		"--quick",
+		"--no-llm",
 		"--output", "spec.yaml",
 		e2eInitialPrompt,
 	); err != nil {
