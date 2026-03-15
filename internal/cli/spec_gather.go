@@ -16,10 +16,11 @@ import (
 
 // specGatherCmd のフラグ変数
 var (
-	specOutput  string
-	specQuick   bool
-	specTimeout int
-	specFormat  string
+	specOutput      string
+	specQuick       bool
+	specTotalTimeout int
+	specInputTimeout int
+	specFormat      string
 )
 
 // specGatherCmd はインタラクティブにAgentSpecを収集するコマンドです
@@ -53,7 +54,8 @@ func init() {
 	// フラグ設定
 	specGatherCmd.Flags().StringVar(&specOutput, "output", "", "出力ファイルパス (指定しない場合は標準出力)")
 	specGatherCmd.Flags().BoolVarP(&specQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
-	specGatherCmd.Flags().IntVarP(&specTimeout, "timeout", "t", 300, "タイムアウト（秒、指定時のみ設定値を上書き）")
+	specGatherCmd.Flags().IntVarP(&specTotalTimeout, "timeout", "t", 0, "全体タイムアウト（秒）、0=設定値使用")
+	specGatherCmd.Flags().IntVar(&specInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
 }
 
@@ -75,25 +77,37 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 		input = args[0]
 	}
 
-	timeout := time.Duration(specTimeout) * time.Second
-	if !cmd.Flags().Changed("timeout") {
-		if cfgTimeout, err := cfg.LLM.GetTimeout(); err == nil {
-			timeout = cfgTimeout
-		}
+	// タイムアウト解決ロジック: CLI > 設定 > デフォルト
+	// 全体タイムアウト
+	totalTimeout := time.Duration(0)
+	if cmd.Flags().Changed("timeout") {
+		totalTimeout = time.Duration(specTotalTimeout) * time.Second
+	} else if cfgTimeout, err := cfg.Interaction.GetTotalTimeout(); err == nil {
+		totalTimeout = cfgTimeout
+	}
+
+	// 入力タイムアウト
+	inputTimeout := time.Duration(0)
+	if cmd.Flags().Changed("input-timeout") {
+		inputTimeout = time.Duration(specInputTimeout) * time.Second
+	} else if cfgTimeout, err := cfg.Interaction.GetInputTimeout(); err == nil {
+		inputTimeout = cfgTimeout
 	}
 
 	// コンテキストにタイムアウトを設定
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
 	defer cancel()
 
 	// Gathererを作成
 	gatherer := spec.NewGatherer(inputReader, os.Stderr)
 	gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
 	gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
+	gatherer.SetInputTimeout(inputTimeout)
 
 	if verbose {
 		fmt.Fprintf(os.Stderr, "入力: %s\n", input)
-		fmt.Fprintf(os.Stderr, "タイムアウト: %s\n", timeout)
+		fmt.Fprintf(os.Stderr, "全体タイムアウト: %s\n", totalTimeout)
+		fmt.Fprintf(os.Stderr, "入力タイムアウト: %s\n", inputTimeout)
 		if specQuick {
 			fmt.Fprintf(os.Stderr, "クイックモード: 有効\n")
 		}

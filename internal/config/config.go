@@ -9,19 +9,21 @@ import (
 
 // Config は agentic-shell のメイン設定構造体です
 type Config struct {
-	LLM        LLMConfig        `mapstructure:"llm" yaml:"llm"`
-	Output     OutputConfig     `mapstructure:"output" yaml:"output"`
-	Gathering  GatheringConfig  `mapstructure:"gathering" yaml:"gathering"`
-	Generation GenerationConfig `mapstructure:"generation" yaml:"generation"`
+	LLM         LLMConfig         `mapstructure:"llm" yaml:"llm"`
+	Output      OutputConfig      `mapstructure:"output" yaml:"output"`
+	Gathering   GatheringConfig   `mapstructure:"gathering" yaml:"gathering"`
+	Generation  GenerationConfig  `mapstructure:"generation" yaml:"generation"`
+	Interaction InteractionConfig `mapstructure:"interaction" yaml:"interaction"`
 }
 
 // ConfigOverrides は設定の上書き値を表します。
 // nil は「未設定」、ポインタ値はゼロ値を含めて「明示設定」を表します。
 type ConfigOverrides struct {
-	LLM        LLMConfigOverrides        `mapstructure:"llm" yaml:"llm"`
-	Output     OutputConfigOverrides     `mapstructure:"output" yaml:"output"`
-	Gathering  GatheringConfigOverrides  `mapstructure:"gathering" yaml:"gathering"`
-	Generation GenerationConfigOverrides `mapstructure:"generation" yaml:"generation"`
+	LLM         LLMConfigOverrides         `mapstructure:"llm" yaml:"llm"`
+	Output      OutputConfigOverrides      `mapstructure:"output" yaml:"output"`
+	Gathering   GatheringConfigOverrides   `mapstructure:"gathering" yaml:"gathering"`
+	Generation  GenerationConfigOverrides  `mapstructure:"generation" yaml:"generation"`
+	Interaction InteractionConfigOverrides `mapstructure:"interaction" yaml:"interaction"`
 }
 
 // LLMConfigOverrides は LLM 設定の上書き値です。
@@ -48,6 +50,12 @@ type GatheringConfigOverrides struct {
 type GenerationConfigOverrides struct {
 	DefaultModel       *string  `mapstructure:"default_model" yaml:"default_model"`
 	DefaultTemperature *float64 `mapstructure:"default_temperature" yaml:"default_temperature"`
+}
+
+// InteractionConfigOverrides はインタラクション設定の上書き値です。
+type InteractionConfigOverrides struct {
+	InputTimeout *string `mapstructure:"input_timeout" yaml:"input_timeout"`
+	TotalTimeout *string `mapstructure:"total_timeout" yaml:"total_timeout"`
 }
 
 // LLMConfig は LLM 関連の設定です
@@ -145,6 +153,37 @@ func (c *GenerationConfig) Validate() error {
 	return nil
 }
 
+// InteractionConfig はインタラクティブ入力関連の設定です
+type InteractionConfig struct {
+	// InputTimeout はユーザー入力待ちのタイムアウト時間です（プロンプトごと）
+	// 0 の場合は無制限（タイムアウトなし）
+	InputTimeout string `mapstructure:"input_timeout" yaml:"input_timeout"`
+
+	// TotalTimeout は全体プロセスのタイムアウト時間です
+	TotalTimeout string `mapstructure:"total_timeout" yaml:"total_timeout"`
+}
+
+// GetInputTimeout は入力タイムアウト設定を time.Duration として返します
+func (c *InteractionConfig) GetInputTimeout() (time.Duration, error) {
+	return time.ParseDuration(c.InputTimeout)
+}
+
+// GetTotalTimeout は全体タイムアウト設定を time.Duration として返します
+func (c *InteractionConfig) GetTotalTimeout() (time.Duration, error) {
+	return time.ParseDuration(c.TotalTimeout)
+}
+
+// Validate は InteractionConfig を検証します
+func (c *InteractionConfig) Validate() error {
+	if _, err := c.GetInputTimeout(); err != nil {
+		return fmt.Errorf("interaction.input_timeout is invalid: %w", err)
+	}
+	if _, err := c.GetTotalTimeout(); err != nil {
+		return fmt.Errorf("interaction.total_timeout is invalid: %w", err)
+	}
+	return nil
+}
+
 // Validate は Config 全体を検証します
 func (c *Config) Validate() error {
 	if err := c.LLM.Validate(); err != nil {
@@ -159,6 +198,9 @@ func (c *Config) Validate() error {
 	if err := c.Generation.Validate(); err != nil {
 		return fmt.Errorf("generation: %w", err)
 	}
+	if err := c.Interaction.Validate(); err != nil {
+		return fmt.Errorf("interaction: %w", err)
+	}
 	return nil
 }
 
@@ -172,7 +214,7 @@ func DefaultConfig() *Config {
 		},
 		Output: OutputConfig{
 			Directory: ".claude/agents",
-			Format:    "markdown",
+		Format:    "markdown",
 			Overwrite: false,
 		},
 		Gathering: GatheringConfig{
@@ -182,6 +224,10 @@ func DefaultConfig() *Config {
 		Generation: GenerationConfig{
 			DefaultModel:       "claude-sonnet-4-6",
 			DefaultTemperature: 0.7,
+		},
+		Interaction: InteractionConfig{
+			InputTimeout: "15m",
+			TotalTimeout: "60m",
 		},
 	}
 }
@@ -221,5 +267,11 @@ func (c *Config) Merge(other *ConfigOverrides) {
 	}
 	if other.Generation.DefaultTemperature != nil {
 		c.Generation.DefaultTemperature = *other.Generation.DefaultTemperature
+	}
+	if other.Interaction.InputTimeout != nil {
+		c.Interaction.InputTimeout = *other.Interaction.InputTimeout
+	}
+	if other.Interaction.TotalTimeout != nil {
+		c.Interaction.TotalTimeout = *other.Interaction.TotalTimeout
 	}
 }

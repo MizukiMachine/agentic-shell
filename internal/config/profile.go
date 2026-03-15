@@ -153,6 +153,10 @@ func builtInProfiles() map[string]Profile {
 				Generation: GenerationConfigOverrides{
 					DefaultTemperature: profileFloat64Ptr(0.85),
 				},
+				Interaction: InteractionConfigOverrides{
+					InputTimeout: profileStringPtr("30m"),
+					TotalTimeout: profileStringPtr("120m"),
+				},
 			},
 			Tools:        []string{"read", "write", "bash"},
 			OutputFormat: "markdown",
@@ -171,6 +175,10 @@ func builtInProfiles() map[string]Profile {
 				},
 				Generation: GenerationConfigOverrides{
 					DefaultTemperature: profileFloat64Ptr(0.30),
+				},
+				Interaction: InteractionConfigOverrides{
+					InputTimeout: profileStringPtr("10m"),
+					TotalTimeout: profileStringPtr("30m"),
 				},
 			},
 			Tools:        []string{"read"},
@@ -213,5 +221,9 @@ func profileFloat64Ptr(v float64) *float64 {
 }
 
 func profileBoolPtr(v bool) *bool {
+	return &v
+}
+
+func profileStringPtr(v string) *string {
 	return &v
 }

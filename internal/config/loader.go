@@ -196,6 +196,7 @@ func WriteConfig(path string, config *Config) error {
 	v.Set("output", config.Output)
 	v.Set("gathering", config.Gathering)
 	v.Set("generation", config.Generation)
+	v.Set("interaction", config.Interaction)
 
 	// ディレクトリを作成
 	dir := filepath.Dir(path)
@@ -251,6 +252,8 @@ func bindEnvKeys(v *viper.Viper) {
 		"gathering.max_question_rounds",
 		"generation.default_model",
 		"generation.default_temperature",
+		"interaction.input_timeout",
+		"interaction.total_timeout",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -298,6 +301,14 @@ func loadOverrides(v *viper.Viper) *ConfigOverrides {
 	if v.IsSet("generation.default_temperature") {
 		value := v.GetFloat64("generation.default_temperature")
 		overrides.Generation.DefaultTemperature = &value
+	}
+	if v.IsSet("interaction.input_timeout") {
+		value := v.GetString("interaction.input_timeout")
+		overrides.Interaction.InputTimeout = &value
+	}
+	if v.IsSet("interaction.total_timeout") {
+		value := v.GetString("interaction.total_timeout")
+		overrides.Interaction.TotalTimeout = &value
 	}
 
 	return overrides
