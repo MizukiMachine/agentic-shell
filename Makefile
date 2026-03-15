@@ -2,7 +2,7 @@
 # ビルド、テスト、インストールなどのタスクを定義
 
 # 変数定義
-APP_NAME := agentic-shell
+APP_NAME := ags
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -18,14 +18,14 @@ all: build
 .PHONY: build
 build:
 	@echo "ビルド中... $(APP_NAME)"
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(APP_NAME) ./cmd/agentic-shell
+	$(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(APP_NAME) ./cmd/ags
 	@echo "ビルド完了: bin/$(APP_NAME)"
 
 # 開発用ビルド（高速）
 .PHONY: dev
 dev:
 	@echo "開発ビルド中..."
-	$(GO) build $(GOFLAGS) -o bin/$(APP_NAME) ./cmd/agentic-shell
+	$(GO) build $(GOFLAGS) -o bin/$(APP_NAME) ./cmd/ags
 	@echo "開発ビルド完了"
 
 # テスト実行
@@ -45,7 +45,7 @@ coverage: test
 .PHONY: install
 install:
 	@echo "インストール中..."
-	$(GO) install $(LDFLAGS) ./cmd/agentic-shell
+	$(GO) install $(LDFLAGS) ./cmd/ags
 	@echo "インストール完了"
 
 # クリーンアップ

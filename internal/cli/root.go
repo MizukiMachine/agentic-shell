@@ -1,4 +1,4 @@
-// Package cli は agentic-shell のCLIコマンドを提供します
+// Package cli は ags のCLIコマンドを提供します
 package cli
 
 import (
@@ -29,18 +29,18 @@ var (
 
 // rootCmd はベースとなるコマンドです
 var rootCmd = &cobra.Command{
-	Use:   "agentic-shell",
+	Use:   "ags",
 	Short: "AIエージェント統合シェル",
-	Long: `agentic-shell は複数のAIエージェントを統合管理する
+	Long: `ags は複数のAIエージェントを統合管理する
 ターミナルベースのシェルアプリケーションです。
 
 Claude、GPT、Gemini などの AI エージェントと対話しながら
 開発作業を効率化できます。
 
 使用例:
-  agentic-shell spec-gather "コードレビューエージェントが欲しい"
-  agentic-shell generate --from spec.yaml
-  agentic-shell version`,
+  ags spec-gather "コードレビューエージェントが欲しい"
+  ags generate --from spec.yaml
+  ags version`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// デフォルトの動作: ヘルプを表示
 		cmd.Help()
@@ -66,7 +66,7 @@ func init() {
 	})
 
 	// グローバルフラグ
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "設定ファイル (デフォルト: $HOME/.agentic-shell.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "設定ファイル (デフォルト: $HOME/.ags.yaml)")
 	rootCmd.PersistentFlags().StringVar(&selectedProfile, "profile", "", "設定プロファイル名 (dev, prod, または custom)")
 	rootCmd.PersistentFlags().StringP("output-dir", "o", "", "出力ディレクトリ (設定値を上書き)")
 	rootCmd.PersistentFlags().StringVar(&selectedOutputFmt, "output-format", "", "出力形式を上書き (markdown, yaml, json)")

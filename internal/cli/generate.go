@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,16 +34,16 @@ var generateCmd = &cobra.Command{
 
 使用例:
   # 新規に仕様を収集して生成
-  agentic-shell generate "ドキュメント生成エージェントを作りたい"
+  ags generate "ドキュメント生成エージェントを作りたい"
 
   # 既存の仕様ファイルから生成
-  agentic-shell generate --from spec.yaml
+  ags generate --from spec.yaml
 
   # クイックモード
-  agentic-shell generate --quick "簡易モード"
+  ags generate --quick "簡易モード"
 
   # 出力ディレクトリを指定
-  agentic-shell generate -o ./output "テストエージェント"`,
+  ags generate -o ./output "テストエージェント"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runGenerate,
 }
@@ -85,14 +86,19 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "仕様ファイルを読み込み: %s\n", genFrom)
 		}
 	} else {
-		// 引数チェック
+		inputReader := bufio.NewReader(os.Stdin)
+		var input string
 		if len(args) == 0 {
-			return fmt.Errorf("入力を指定するか --from フラグを使用してください")
+			input, err = PromptForInput(inputReader, os.Stderr, "生成したいエージェントの要件を入力してください: ")
+			if err != nil {
+				return fmt.Errorf("入力取得エラー: %w", err)
+			}
+		} else {
+			input = args[0]
 		}
 
 		// spec-gatherを実行
-		input := args[0]
-		gatherer := spec.NewGatherer(os.Stdin, os.Stderr)
+		gatherer := spec.NewGatherer(inputReader, os.Stderr)
 		gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
 		gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
 

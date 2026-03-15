@@ -11,6 +11,10 @@ func TestRootCommandHelp(t *testing.T) {
 		t.Fatal("rootCmd is nil")
 	}
 
+	if cmd.Use != "ags" {
+		t.Fatalf("expected root use to be ags, got %s", cmd.Use)
+	}
+
 	// ヘルプテキストの検証
 	if !strings.Contains(cmd.Short, "AI") {
 		t.Errorf("expected short description to contain 'AI', got %s", cmd.Short)

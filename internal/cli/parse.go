@@ -20,9 +20,9 @@ var parseCmd = &cobra.Command{
 	Long: `仕様ファイルを解析し、後続のパイプライン段で扱いやすい構造化データへ変換します。
 
 使用例:
-  agentic-shell parse spec.md
-  cat spec.yaml | agentic-shell parse --stdin-name spec.yaml
-  agentic-shell parse spec.md --output parsed.json --format json`,
+  ags parse spec.md
+  cat spec.yaml | ags parse --stdin-name spec.yaml
+  ags parse spec.md --output parsed.json --format json`,
 	RunE: runParse,
 }
 

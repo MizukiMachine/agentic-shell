@@ -177,7 +177,7 @@ Build an individual CLI pipeline for code review and security analysis.
 func writeE2EConfig(t *testing.T, dir string) string {
 	t.Helper()
 
-	configPath := filepath.Join(dir, "agentic-shell.yaml")
+	configPath := filepath.Join(dir, ".ags.yaml")
 	config := strings.TrimSpace(`
 llm:
   claude_path: "claude"
