@@ -3,7 +3,6 @@ package spec
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,18 +44,6 @@ type Gatherer struct {
 	inputTimeout        time.Duration
 	useLLMQuestions     bool
 	now                 func() time.Time
-}
-
-type llmTurnError struct {
-	err error
-}
-
-func (e *llmTurnError) Error() string {
-	return e.err.Error()
-}
-
-func (e *llmTurnError) Unwrap() error {
-	return e.err
 }
 
 // NewGatherer は対話収集に使う Gatherer を生成します。
@@ -138,19 +125,10 @@ func (g *Gatherer) GatherInteractive(ctx context.Context, initialInput string) (
 		}
 
 		dynamicSpec, err := g.gatherDynamic(ctx, trimmedInput, spec, threshold)
-		if err == nil {
-			return dynamicSpec, nil
+		if err != nil {
+			return nil, fmt.Errorf("動的質問生成に失敗しました: %w", err)
 		}
-
-		var llmErr *llmTurnError
-		if errors.As(err, &llmErr) {
-			if _, writeErr := fmt.Fprintf(g.output, "LLM質問生成に失敗したため固定質問にフォールバックします: %v\n", llmErr.err); writeErr != nil {
-				return nil, writeErr
-			}
-			return g.gatherStepBack(ctx, trimmedInput, spec, threshold)
-		}
-
-		return nil, err
+		return dynamicSpec, nil
 	}
 
 	return g.gatherStepBack(ctx, trimmedInput, spec, threshold)
@@ -200,7 +178,7 @@ func (g *Gatherer) gatherStepBack(ctx context.Context, initialInput string, spec
 
 func (g *Gatherer) gatherDynamic(ctx context.Context, initialInput string, spec *AgentSpec, threshold float64) (*AgentSpec, error) {
 	if g.interpreter == nil {
-		return nil, &llmTurnError{err: fmt.Errorf("llm interpreter is not configured")}
+		return nil, fmt.Errorf("LLM interpreter is not configured")
 	}
 
 	state := NewConversationState(initialInput, spec)
@@ -208,7 +186,7 @@ func (g *Gatherer) gatherDynamic(ctx context.Context, initialInput string, spec 
 
 	response, err := g.interpreter.ProcessTurn(ctx, state)
 	if err != nil {
-		return nil, &llmTurnError{err: err}
+		return nil, fmt.Errorf("LLM response generation failed: %w", err)
 	}
 
 	for round := 0; round < g.maxRounds; round++ {
@@ -242,7 +220,7 @@ func (g *Gatherer) gatherDynamic(ctx context.Context, initialInput string, spec 
 
 		response, err = g.interpreter.ProcessTurn(ctx, state)
 		if err != nil {
-			return nil, &llmTurnError{err: err}
+			return nil, fmt.Errorf("LLM response generation failed: %w", err)
 		}
 	}
 

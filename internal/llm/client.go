@@ -70,8 +70,8 @@ func (c *ClaudeClient) Execute(ctx context.Context, prompt string) (string, erro
 	// コマンド作成
 	cmd := exec.CommandContext(ctx, c.cliPath, args...)
 
-	// 出力を取得
-	output, err := cmd.Output()
+	// CombinedOutput を使用して stdout と stderr の両方を取得
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// タイムアウトチェック
 		if ctx.Err() == context.DeadlineExceeded {
@@ -79,7 +79,11 @@ func (c *ClaudeClient) Execute(ctx context.Context, prompt string) (string, erro
 		}
 		// 終了コードエラーの場合は詳細を返す
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("command failed with exit code %d: %s", exitErr.ExitCode(), string(exitErr.Stderr))
+			outputStr := string(output)
+			if outputStr == "" {
+				outputStr = "(no output)"
+			}
+			return "", fmt.Errorf("claude CLI failed with exit code %d\nOutput: %s\nPrompt length: %d chars", exitErr.ExitCode(), outputStr, len(prompt))
 		}
 		return "", fmt.Errorf("command execution failed: %w", err)
 	}

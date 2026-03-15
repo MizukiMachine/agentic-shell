@@ -126,35 +126,21 @@ func TestGatherInteractiveWithLLM(t *testing.T) {
 	}
 }
 
-func TestGatherInteractiveFallsBackWhenLLMFails(t *testing.T) {
-	answers := strings.Join([]string{
-		"The core problem is converting vague requests into implementation-ready specifications without breaking the existing workflow",
-		"This matters because teams need a predictable path even when LLM generation fails in production workflows",
-		"Prefer safe, reliable, reviewable changes over risky automation so fallback remains trustworthy",
-		"The ideal solution is a Go CLI flow with JSON and YAML output, dynamic questions behind a flag, and strong unit test coverage",
-		"It connects to broader objectives around reliable agent generation and maintainable specification tooling",
-	}, "\n") + "\n"
-
+func TestGatherInteractiveReturnsErrorWhenLLMFails(t *testing.T) {
 	var output bytes.Buffer
-	gatherer := NewGatherer(strings.NewReader(answers), &output)
+	gatherer := NewGatherer(strings.NewReader(""), &output)
 	gatherer.SetUseLLMQuestions(true)
 	gatherer.SetInterpreter(NewInterpreter(&mockLLMClient{
 		executeJSONErr: fmt.Errorf("claude unavailable"),
 	}))
 
-	spec, err := gatherer.GatherInteractive(context.Background(), "Refactor spec-gather to use dynamic LLM questions")
-	if err != nil {
-		t.Fatalf("GatherInteractive returned error: %v", err)
+	_, err := gatherer.GatherInteractive(context.Background(), "Refactor spec-gather to use dynamic LLM questions")
+	if err == nil {
+		t.Fatal("expected error when LLM fails, got nil")
 	}
 
-	if spec.Intent.Metadata.Confidence < 0.90 {
-		t.Fatalf("expected fallback path to honor 0.90 confidence threshold, got %.2f", spec.Intent.Metadata.Confidence)
-	}
-	if !strings.Contains(output.String(), "LLM質問生成に失敗したため固定質問にフォールバックします") {
-		t.Fatal("expected fallback notice in output")
-	}
-	if !strings.Contains(output.String(), "What is the core problem") {
-		t.Fatal("expected fixed questions after fallback")
+	if !strings.Contains(err.Error(), "動的質問生成に失敗しました") {
+		t.Fatalf("expected error message about LLM failure, got: %v", err)
 	}
 }
 
