@@ -18,6 +18,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Gathering.ConfidenceThreshold != 0.85 {
 		t.Fatalf("expected default confidence threshold 0.85, got %v", cfg.Gathering.ConfidenceThreshold)
 	}
+	if cfg.Gathering.UseLLMQuestions {
+		t.Fatal("expected default use_llm_questions=false")
+	}
 	if cfg.Generation.DefaultTemperature != 0.7 {
 		t.Fatalf("expected default temperature 0.7, got %v", cfg.Generation.DefaultTemperature)
 	}
@@ -27,6 +30,7 @@ func TestLoaderLoadFromEnv(t *testing.T) {
 	t.Setenv("AGENTIC_LLM_CLAUDE_PATH", "/usr/local/bin/claude")
 	t.Setenv("AGENTIC_LLM_MAX_RETRIES", "0")
 	t.Setenv("AGENTIC_GATHERING_CONFIDENCE_THRESHOLD", "0")
+	t.Setenv("AGENTIC_GATHERING_USE_LLM_QUESTIONS", "true")
 	t.Setenv("AGENTIC_GENERATION_DEFAULT_TEMPERATURE", "0")
 	t.Setenv("AGENTIC_OUTPUT_OVERWRITE", "true")
 
@@ -43,6 +47,9 @@ func TestLoaderLoadFromEnv(t *testing.T) {
 	}
 	if cfg.Gathering.ConfidenceThreshold != 0 {
 		t.Fatalf("expected env override for gathering.confidence_threshold=0, got %v", cfg.Gathering.ConfidenceThreshold)
+	}
+	if !cfg.Gathering.UseLLMQuestions {
+		t.Fatal("expected env override for gathering.use_llm_questions=true")
 	}
 	if cfg.Generation.DefaultTemperature != 0 {
 		t.Fatalf("expected env override for generation.default_temperature=0, got %v", cfg.Generation.DefaultTemperature)
@@ -63,6 +70,7 @@ output:
 gathering:
   confidence_threshold: 0.9
   max_question_rounds: 3
+  use_llm_questions: true
 generation:
   default_model: claude-opus-4-1
   default_temperature: 0.2
@@ -89,6 +97,9 @@ generation:
 	}
 	if cfg.Gathering.MaxQuestionRounds != 3 {
 		t.Fatalf("expected max_question_rounds=3, got %d", cfg.Gathering.MaxQuestionRounds)
+	}
+	if !cfg.Gathering.UseLLMQuestions {
+		t.Fatal("expected use_llm_questions=true from file")
 	}
 	if cfg.Generation.DefaultModel != "claude-opus-4-1" {
 		t.Fatalf("expected default_model from file, got %q", cfg.Generation.DefaultModel)
@@ -122,6 +133,7 @@ func TestConfigMergePreservesZeroValues(t *testing.T) {
 		Gathering: GatheringConfigOverrides{
 			ConfidenceThreshold: float64Ptr(0),
 			MaxQuestionRounds:   intPtr(1),
+			UseLLMQuestions:     boolPtr(true),
 		},
 		Generation: GenerationConfigOverrides{
 			DefaultTemperature: float64Ptr(0),
@@ -139,6 +151,9 @@ func TestConfigMergePreservesZeroValues(t *testing.T) {
 	}
 	if cfg.Gathering.MaxQuestionRounds != 1 {
 		t.Fatalf("expected gathering.max_question_rounds=1, got %d", cfg.Gathering.MaxQuestionRounds)
+	}
+	if !cfg.Gathering.UseLLMQuestions {
+		t.Fatal("expected gathering.use_llm_questions=true")
 	}
 	if cfg.Generation.DefaultTemperature != 0 {
 		t.Fatalf("expected generation.default_temperature=0, got %v", cfg.Generation.DefaultTemperature)
