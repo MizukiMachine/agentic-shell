@@ -137,8 +137,13 @@ func TestGatherInteractiveContextCancel(t *testing.T) {
 	select {
 	case err := <-done:
 		close(reader.unblock)
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context cancellation, got: %v", err)
+		// コンテキストキャンセルは TimeoutError{Type: "total"} として返される
+		var timeoutErr *TimeoutError
+		if !errors.As(err, &timeoutErr) {
+			t.Fatalf("expected TimeoutError, got: %v (%T)", err, err)
+		}
+		if timeoutErr.Type != "total" {
+			t.Fatalf("expected TimeoutError type 'total', got: %s", timeoutErr.Type)
 		}
 	case <-time.After(200 * time.Millisecond):
 		close(reader.unblock)

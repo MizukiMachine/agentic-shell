@@ -20,9 +20,10 @@ import (
 
 // generateCmd のフラグ変数
 var (
-	genFrom    string
-	genQuick   bool
-	genTimeout int
+	genFrom         string
+	genQuick        bool
+	genTotalTimeout int
+	genInputTimeout int
 )
 
 // generateCmd はエージェント定義を生成するコマンドです
@@ -54,7 +55,8 @@ func init() {
 	// フラグ設定
 	generateCmd.Flags().StringVarP(&genFrom, "from", "f", "", "入力仕様ファイル (指定しない場合はspec-gatherを実行)")
 	generateCmd.Flags().BoolVarP(&genQuick, "quick", "q", false, "クイックモード（低信頼度でも継続）")
-	generateCmd.Flags().IntVarP(&genTimeout, "timeout", "t", 300, "タイムアウト（秒、指定時のみ設定値を上書き）")
+	generateCmd.Flags().IntVarP(&genTotalTimeout, "timeout", "t", 0, "全体タイムアウト（秒）、0=設定値使用")
+	generateCmd.Flags().IntVar(&genInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 }
 
 // runGenerate はgenerateコマンドのメイン処理です
@@ -63,14 +65,24 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	outputDir := cfg.Output.Directory
 	verbose := GetVerbose()
 
-	timeout := time.Duration(genTimeout) * time.Second
-	if !cmd.Flags().Changed("timeout") {
-		if cfgTimeout, err := cfg.LLM.GetTimeout(); err == nil {
-			timeout = cfgTimeout
-		}
+	// タイムアウト解決ロジック: CLI > 設定 > デフォルト
+	// 全体タイムアウト
+	totalTimeout := time.Duration(0)
+	if cmd.Flags().Changed("timeout") {
+		totalTimeout = time.Duration(genTotalTimeout) * time.Second
+	} else if cfgTimeout, err := cfg.Interaction.GetTotalTimeout(); err == nil {
+		totalTimeout = cfgTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// 入力タイムアウト
+	inputTimeout := time.Duration(0)
+	if cmd.Flags().Changed("input-timeout") {
+		inputTimeout = time.Duration(genInputTimeout) * time.Second
+	} else if cfgTimeout, err := cfg.Interaction.GetInputTimeout(); err == nil {
+		inputTimeout = cfgTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), totalTimeout)
 	defer cancel()
 
 	var agentSpec *spec.AgentSpec
@@ -101,9 +113,12 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 		gatherer := spec.NewGatherer(inputReader, os.Stderr)
 		gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
 		gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
+		gatherer.SetInputTimeout(inputTimeout)
 
 		if verbose {
 			fmt.Fprintf(os.Stderr, "仕様収集中: %s\n", input)
+			fmt.Fprintf(os.Stderr, "全体タイムアウト: %s\n", totalTimeout)
+			fmt.Fprintf(os.Stderr, "入力タイムアウト: %s\n", inputTimeout)
 		}
 
 		agentSpec, err = gatherer.GatherInteractive(ctx, input)

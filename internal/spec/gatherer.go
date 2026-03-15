@@ -18,6 +18,18 @@ const maxGatherRounds = 5
 // AgentSpec は types.AgentSpec の別名です。
 type AgentSpec = types.AgentSpec
 
+// TimeoutError はタイムアウトの種類とヒントを含むエラー型です。
+type TimeoutError struct {
+	Type    string // "input" or "total"
+	Message string
+	Hint    string
+}
+
+// Error は error インターフェースを実装します。
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("%s\nヒント: %s", e.Message, e.Hint)
+}
+
 // Gatherer は対話入力から AgentSpec を段階的に構築します。
 type Gatherer struct {
 	input               io.Reader
@@ -26,6 +38,7 @@ type Gatherer struct {
 	calculator          *ConfidenceCalculator
 	maxRounds           int
 	confidenceThreshold float64
+	inputTimeout        time.Duration
 	now                 func() time.Time
 }
 
@@ -55,6 +68,12 @@ func (g *Gatherer) SetMaxRounds(maxRounds int) {
 // SetConfidenceThreshold は採用信頼度の閾値を設定します。
 func (g *Gatherer) SetConfidenceThreshold(threshold float64) {
 	g.confidenceThreshold = threshold
+}
+
+// SetInputTimeout はユーザー入力待ちのタイムアウトを設定します。
+// 0 を設定した場合は無制限（タイムアウトなし）となります。
+func (g *Gatherer) SetInputTimeout(timeout time.Duration) {
+	g.inputTimeout = timeout
 }
 
 // GatherInteractive は質問と回答を通じて AgentSpec を補完します。
@@ -244,9 +263,26 @@ func (g *Gatherer) readLine(ctx context.Context) (string, error) {
 		}
 	}()
 
+	// 入力タイムアウトと全体タイムアウトを別個に監視
+	// inputTimeout が 0 の場合は無制限
+	var inputTimer <-chan time.Time
+	if g.inputTimeout > 0 {
+		inputTimer = time.After(g.inputTimeout)
+	}
+
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", &TimeoutError{
+			Type:    "total",
+			Message: fmt.Sprintf("全体処理がタイムアウトしました (%v)", ctx.Err()),
+			Hint:    "--timeout フラグで延長できます",
+		}
+	case <-inputTimer:
+		return "", &TimeoutError{
+			Type:    "input",
+			Message: fmt.Sprintf("入力待ちタイムアウト (%v経過)", g.inputTimeout),
+			Hint:    "--input-timeout フラグで延長、または0で無制限にできます",
+		}
 	case result := <-resultCh:
 		return result.line, result.err
 	}
