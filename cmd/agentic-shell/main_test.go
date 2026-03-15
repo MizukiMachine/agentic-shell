@@ -25,14 +25,14 @@ func TestMain(m *testing.M) {
 
 	testProjectRoot = filepath.Dir(filepath.Dir(wd))
 
-	tempDir, err := os.MkdirTemp("", "agentic-shell-test-binary-*")
+	tempDir, err := os.MkdirTemp("", "ags-test-binary-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
 
-	testBinaryPath = filepath.Join(tempDir, "agentic-shell")
-	buildCmd := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/agentic-shell")
+	testBinaryPath = filepath.Join(tempDir, "ags")
+	buildCmd := exec.Command("go", "build", "-o", testBinaryPath, "./cmd/ags")
 	buildCmd.Dir = testProjectRoot
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build test binary: %v\n%s", err, output)
@@ -71,8 +71,8 @@ func TestVersionCommand(t *testing.T) {
 
 	output := out.String()
 	// バージョン情報が出力されることを確認
-	if !strings.Contains(output, "agentic-shell") {
-		t.Errorf("バージョン出力に 'agentic-shell' が含まれていません: %s", output)
+	if !strings.Contains(output, "ags") {
+		t.Errorf("バージョン出力に 'ags' が含まれていません: %s", output)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "バージョン情報を表示",
-	Long: `agentic-shell のバージョン情報を表示します。
+	Long: `ags のバージョン情報を表示します。
 
 表示内容:
   - バージョン番号
@@ -30,7 +30,7 @@ func init() {
 
 // printVersion はバージョン情報を整形して表示します
 func printVersion() {
-	fmt.Printf("agentic-shell %s\n", Version)
+	fmt.Printf("ags %s\n", Version)
 	fmt.Println("---")
 	fmt.Printf("  Commit:  %s\n", Commit)
 	fmt.Printf("  Built:   %s\n", Date)

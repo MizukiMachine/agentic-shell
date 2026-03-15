@@ -11,7 +11,7 @@ import (
 
 const (
 	// DefaultConfigName はデフォルトの設定ファイル名です
-	DefaultConfigName = ".agentic-shell"
+	DefaultConfigName = ".ags"
 
 	// DefaultConfigType はデフォルトの設定ファイルタイプです
 	DefaultConfigType = "yaml"

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,17 +33,17 @@ var specGatherCmd = &cobra.Command{
 
 使用例:
   # 基本的な使用方法
-  agentic-shell spec-gather "コードレビューエージェントが欲しい"
+  ags spec-gather "コードレビューエージェントが欲しい"
 
   # 出力ファイルを指定
-  agentic-shell spec-gather --output spec.yaml "テスト自動化"
+  ags spec-gather --output spec.yaml "テスト自動化"
 
   # クイックモード（最小限の質問で収束、低信頼度でも継続）
-  agentic-shell spec-gather --quick "ドキュメント生成"
+  ags spec-gather --quick "ドキュメント生成"
 
   # JSON形式で出力
-  agentic-shell spec-gather --format json --output spec.json "APIエージェント"`,
-	Args: cobra.MinimumNArgs(1),
+  ags spec-gather --format json --output spec.json "APIエージェント"`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runSpecGather,
 }
 
@@ -62,7 +63,17 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	outputDir := cfg.Output.Directory
 	verbose := GetVerbose()
 
-	input := args[0]
+	inputReader := bufio.NewReader(os.Stdin)
+	var input string
+	if len(args) == 0 {
+		var err error
+		input, err = PromptForInput(inputReader, os.Stderr, "収集したい仕様を入力してください: ")
+		if err != nil {
+			return fmt.Errorf("入力取得エラー: %w", err)
+		}
+	} else {
+		input = args[0]
+	}
 
 	timeout := time.Duration(specTimeout) * time.Second
 	if !cmd.Flags().Changed("timeout") {
@@ -76,7 +87,7 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	// Gathererを作成
-	gatherer := spec.NewGatherer(os.Stdin, os.Stderr)
+	gatherer := spec.NewGatherer(inputReader, os.Stderr)
 	gatherer.SetMaxRounds(cfg.Gathering.MaxQuestionRounds)
 	gatherer.SetConfidenceThreshold(cfg.Gathering.ConfidenceThreshold)
 

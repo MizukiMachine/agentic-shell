@@ -1,6 +1,6 @@
 # agentic-shell
 
-`agentic-shell` は、自然言語の要望からエージェント仕様を収集し、Claude Code 互換のエージェント定義 Markdown を生成する Go 製 CLI です。
+`agentic-shell` は、自然言語の要望からエージェント仕様を収集し、Claude Code 互換のエージェント定義 Markdown を生成する Go 製 CLI です。実行バイナリ名は `ags` です。
 
 現在の実装で主に使うコマンドは次の 2 つです。
 
@@ -25,13 +25,13 @@
 ```bash
 git clone https://github.com/MizukiMachine/agentic-shell.git
 cd agentic-shell
-go build -o agentic-shell ./cmd/agentic-shell
+go build -o ags ./cmd/ags
 ```
 
 ### 2. `go install`
 
 ```bash
-go install github.com/MizukiMachine/agentic-shell/cmd/agentic-shell@latest
+go install github.com/MizukiMachine/agentic-shell/cmd/ags@latest
 ```
 
 ### 3. Makefile を使う
@@ -40,7 +40,7 @@ go install github.com/MizukiMachine/agentic-shell/cmd/agentic-shell@latest
 make build
 ```
 
-生成物は `bin/agentic-shell` に出力されます。
+生成物は `bin/ags` に出力されます。
 
 ## 使用例
 
@@ -49,13 +49,13 @@ make build
 `spec.yaml` をカレントディレクトリに出したい場合は、`--output-dir .` を付けます。
 
 ```bash
-./agentic-shell --output-dir . spec-gather --quick --output spec.yaml "code review agent"
+./ags --output-dir . spec-gather --quick --output spec.yaml "code review agent"
 ```
 
 ### 2. 仕様ファイルからエージェントを生成する
 
 ```bash
-./agentic-shell --output-dir . generate --from spec.yaml
+./ags --output-dir . generate --from spec.yaml
 ```
 
 生成先は `./.claude/agents/<agent-name>.md` です。
@@ -63,24 +63,24 @@ make build
 ### 3. 1 回で仕様収集から生成まで進める
 
 ```bash
-./agentic-shell generate "code review agent"
+./ags generate "code review agent"
 ```
 
 ### 4. バージョン確認
 
 ```bash
-./agentic-shell version
+./ags version
 ```
 
 ### 5. pipeline サブコマンドをつなげて不足スキルを生成する
 
 ```bash
-./agentic-shell parse spec.md \
-  | ./agentic-shell extract \
-  | ./agentic-shell skill-scan --skills-dir .claude/skills \
-  | ./agentic-shell match --skills-dir .claude/skills \
-  | ./agentic-shell skill-gen --skills-dir .claude/skills \
-  | ./agentic-shell output --skills-dir .claude/skills
+./ags parse spec.md \
+  | ./ags extract \
+  | ./ags skill-scan --skills-dir .claude/skills \
+  | ./ags match --skills-dir .claude/skills \
+  | ./ags skill-gen --skills-dir .claude/skills \
+  | ./ags output --skills-dir .claude/skills
 ```
 
 `--skills-dir custom/skills` のように指定すると、`output` は `custom/skills/<skill-name>/SKILL.md` へ書き出します。
@@ -96,10 +96,10 @@ make build
 
 ### 設定ファイル
 
-デフォルトでは `.agentic-shell.yaml` を探索します。明示的に指定する場合は `--config` を使います。
+デフォルトでは `.ags.yaml` を探索します。明示的に指定する場合は `--config` を使います。
 
 ```bash
-./agentic-shell --config ./agentic-shell.yaml --output-dir . spec-gather --output spec.yaml "documentation agent"
+./ags --config ./.ags.yaml --output-dir . spec-gather --output spec.yaml "documentation agent"
 ```
 
 設定例:
@@ -173,7 +173,8 @@ go test ./...
 
 ```text
 agentic-shell/
-├── cmd/agentic-shell/   # CLI エントリーポイントと E2E テスト
+├── cmd/ags/             # CLI エントリーポイント
+├── cmd/agentic-shell/   # E2E テスト
 ├── internal/cli/        # Cobra コマンド実装
 ├── internal/spec/       # 仕様収集と検証
 ├── internal/agent/      # エージェント定義生成
