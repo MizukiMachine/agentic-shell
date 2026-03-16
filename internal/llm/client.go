@@ -11,27 +11,18 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 )
 
 const (
-	defaultClaudeTimeout = 5 * time.Minute
 	defaultGLMBaseURL    = "https://open.bigmodel.cn/api/paas/v4/"
 	defaultGLMModel      = "glm-4-flash"
 	defaultGLMTimeout    = 2 * time.Minute
 	defaultGLMMaxRetries = 3
 	glmAPIKeyEnv         = "GLM_API_KEY"
 )
-
-// ClaudeClient はClaude CLIをsubprocessで呼び出すクライアントです
-type ClaudeClient struct {
-	timeout time.Duration
-	cliPath string // Claude CLIのパス（デフォルト: "claude"）
-	cliArgs []string
-}
 
 // GLMClient は GLM API を呼び出すクライアントです。
 type GLMClient struct {
@@ -45,19 +36,11 @@ type GLMClient struct {
 
 // ClientOption は LLM クライアントのオプション設定です。
 type ClientOption interface {
-	applyClaude(*ClaudeClient)
 	applyGLM(*GLMClient)
 }
 
 type clientOption struct {
-	applyClaudeFunc func(*ClaudeClient)
-	applyGLMFunc    func(*GLMClient)
-}
-
-func (o clientOption) applyClaude(c *ClaudeClient) {
-	if o.applyClaudeFunc != nil {
-		o.applyClaudeFunc(c)
-	}
+	applyGLMFunc func(*GLMClient)
 }
 
 func (o clientOption) applyGLM(c *GLMClient) {
@@ -66,19 +49,12 @@ func (o clientOption) applyGLM(c *GLMClient) {
 	}
 }
 
-// NewClaudeClient は新しいClaudeClientを作成します
-func NewClaudeClient(opts ...ClientOption) *ClaudeClient {
-	client := &ClaudeClient{
-		timeout: defaultClaudeTimeout,
-		cliPath: "claude",
-		cliArgs: []string{"-p"}, // デフォルトは非対話モード
-	}
-
-	for _, opt := range opts {
-		opt.applyClaude(client)
-	}
-
-	return client
+// GLMConfig は NewLLMClient で使用する設定です。
+type GLMConfig struct {
+	BaseURL    string
+	Model      string
+	Timeout    time.Duration
+	MaxRetries int
 }
 
 // NewGLMClient は新しい GLMClient を作成します。
@@ -118,32 +94,11 @@ func NewGLMClient(opts ...ClientOption) (*GLMClient, error) {
 // WithTimeout はタイムアウトを設定するオプションです
 func WithTimeout(d time.Duration) ClientOption {
 	return clientOption{
-		applyClaudeFunc: func(c *ClaudeClient) {
-			c.timeout = d
-		},
 		applyGLMFunc: func(c *GLMClient) {
 			c.timeout = d
 			if c.httpClient != nil {
 				c.httpClient.Timeout = d
 			}
-		},
-	}
-}
-
-// WithCLIPath はClaude CLIのパスを設定するオプションです
-func WithCLIPath(path string) ClientOption {
-	return clientOption{
-		applyClaudeFunc: func(c *ClaudeClient) {
-			c.cliPath = path
-		},
-	}
-}
-
-// WithCLIArgs は追加のCLI引数を設定するオプションです
-func WithCLIArgs(args ...string) ClientOption {
-	return clientOption{
-		applyClaudeFunc: func(c *ClaudeClient) {
-			c.cliArgs = append(c.cliArgs, args...)
 		},
 	}
 }
@@ -175,37 +130,40 @@ func WithMaxRetries(n int) ClientOption {
 	}
 }
 
-// Execute はClaude CLIを非対話モードで実行し、結果を返します
-func (c *ClaudeClient) Execute(ctx context.Context, prompt string) (string, error) {
-	// タイムアウト付きコンテキストを作成
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-
-	// コマンド引数を構築
-	args := append(c.cliArgs, prompt)
-
-	// コマンド作成
-	cmd := exec.CommandContext(ctx, c.cliPath, args...)
-
-	// CombinedOutput を使用して stdout と stderr の両方を取得
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// タイムアウトチェック
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("command timed out after %v: %w", c.timeout, err)
-		}
-		// 終了コードエラーの場合は詳細を返す
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			outputStr := string(output)
-			if outputStr == "" {
-				outputStr = "(no output)"
-			}
-			return "", fmt.Errorf("claude CLI failed with exit code %d\nOutput: %s\nPrompt length: %d chars", exitErr.ExitCode(), outputStr, len(prompt))
-		}
-		return "", fmt.Errorf("command execution failed: %w", err)
+// NewLLMClient は設定からGLMクライアントを作成します。
+// GLM_API_KEY環境変数が未設定の場合はエラーを返します。
+func NewLLMClient(cfg *GLMConfig) (LLMClient, error) {
+	apiKey := strings.TrimSpace(os.Getenv(glmAPIKeyEnv))
+	if apiKey == "" {
+		return nil, &APIKeyError{}
 	}
 
-	return string(output), nil
+	opts := []ClientOption{}
+
+	if cfg.BaseURL != "" {
+		opts = append(opts, WithBaseURL(cfg.BaseURL))
+	}
+	if cfg.Model != "" {
+		opts = append(opts, WithModel(cfg.Model))
+	}
+	if cfg.Timeout > 0 {
+		opts = append(opts, WithTimeout(cfg.Timeout))
+	}
+	if cfg.MaxRetries > 0 {
+		opts = append(opts, WithMaxRetries(cfg.MaxRetries))
+	}
+
+	return NewGLMClient(opts...)
+}
+
+// APIKeyError はAPIキーが未設定の場合のエラーです。
+type APIKeyError struct{}
+
+func (e *APIKeyError) Error() string {
+	return fmt.Sprintf(`%s environment variable is not set.
+Please set your GLM API key:
+  export GLM_API_KEY=your_api_key_here
+Get your API key at: https://open.bigmodel.cn/`, glmAPIKeyEnv)
 }
 
 type glmChatCompletionRequest struct {
@@ -367,30 +325,6 @@ func shouldRetryStatus(statusCode int) bool {
 	return statusCode == http.StatusRequestTimeout || statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
 }
 
-// ExecuteJSON はClaude CLIを実行し、JSONレスポンスをパースします
-func (c *ClaudeClient) ExecuteJSON(ctx context.Context, prompt string, target interface{}) error {
-	// プロンプトにJSON要求を追加
-	jsonPrompt := fmt.Sprintf("%s\n\n重要: 必ず有効なJSON形式で回答してください。余計な説明は不要です。", prompt)
-
-	output, err := c.Execute(ctx, jsonPrompt)
-	if err != nil {
-		return fmt.Errorf("execute failed: %w", err)
-	}
-
-	// JSONを抽出
-	jsonStr, err := extractJSON(output)
-	if err != nil {
-		return fmt.Errorf("json extraction failed: %w", err)
-	}
-
-	// JSONをパース
-	if err := json.Unmarshal([]byte(jsonStr), target); err != nil {
-		return fmt.Errorf("json unmarshal failed: %w (input: %s)", err, jsonStr)
-	}
-
-	return nil
-}
-
 // extractJSON は出力からJSONを抽出します
 // マークダウンコードブロックから抽出、または生JSONにフォールバック
 func extractJSON(output string) (string, error) {
@@ -441,16 +375,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// SetTimeout はタイムアウトを動的に設定します
-func (c *ClaudeClient) SetTimeout(d time.Duration) {
-	c.timeout = d
-}
-
-// GetTimeout は現在のタイムアウト設定を返します
-func (c *ClaudeClient) GetTimeout() time.Duration {
-	return c.timeout
-}
-
 // SetTimeout はタイムアウトを動的に設定します。
 func (c *GLMClient) SetTimeout(d time.Duration) {
 	c.timeout = d
@@ -476,5 +400,4 @@ type LLMClient interface {
 type Client = LLMClient
 
 // Compile-time interface check
-var _ LLMClient = (*ClaudeClient)(nil)
 var _ LLMClient = (*GLMClient)(nil)
