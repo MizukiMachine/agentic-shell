@@ -62,7 +62,7 @@ func init() {
 	specGatherCmd.Flags().IntVar(&specInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
 	specGatherCmd.Flags().BoolVar(&specNoLLM, "no-llm", false, "従来の固定質問モードを使用（LLM動的生成を無効化）")
-	specGatherCmd.Flags().StringVar(&specClaudePath, "claude-path", "", "Claude CLI のパス (指定しない場合は設定値または対話で確認)")
+	specGatherCmd.Flags().StringVar(&specClaudePath, "claude-path", "", "Claude CLI のパス (指定しない場合はデフォルト値または対話で確認)")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
@@ -121,8 +121,11 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	gatherer.SetUseLLMQuestions(useLLMQuestions)
 
 	if useLLMQuestions {
-		// Claude CLI のパスを決定（優先順位: CLI フラグ > 設定ファイル > 対話で確認）
+		// Claude CLI のパスを決定（優先順位: CLI フラグ > 設定ファイル > デフォルト値 > 対話で確認）
 		claudePath := cfg.LLM.ClaudePath
+		if claudePath == "" {
+			claudePath = "claude"
+		}
 		if cmd.Flags().Changed("claude-path") && specClaudePath != "" {
 			claudePath = specClaudePath
 		} else {

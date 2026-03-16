@@ -28,9 +28,14 @@ type ConfigOverrides struct {
 
 // LLMConfigOverrides は LLM 設定の上書き値です。
 type LLMConfigOverrides struct {
-	ClaudePath *string `mapstructure:"claude_path" yaml:"claude_path"`
+	Provider   *string `mapstructure:"provider" yaml:"provider"`
+	BaseURL    *string `mapstructure:"base_url" yaml:"base_url"`
+	Model      *string `mapstructure:"model" yaml:"model"`
 	Timeout    *string `mapstructure:"timeout" yaml:"timeout"`
 	MaxRetries *int    `mapstructure:"max_retries" yaml:"max_retries"`
+
+	// ClaudePath は deprecated です。後方互換のため受理しますが無視します。
+	ClaudePath *string `mapstructure:"claude_path" yaml:"claude_path"`
 }
 
 // OutputConfigOverrides は出力設定の上書き値です。
@@ -61,14 +66,24 @@ type InteractionConfigOverrides struct {
 
 // LLMConfig は LLM 関連の設定です
 type LLMConfig struct {
-	// ClaudePath は Claude CLI のパスです
-	ClaudePath string `mapstructure:"claude_path" yaml:"claude_path"`
+	// Provider は使用する LLM プロバイダーです
+	Provider string `mapstructure:"provider" yaml:"provider"`
+
+	// BaseURL は LLM API のベース URL です
+	BaseURL string `mapstructure:"base_url" yaml:"base_url"`
+
+	// Model は使用するモデル名です
+	Model string `mapstructure:"model" yaml:"model"`
 
 	// Timeout は LLM リクエストのタイムアウト時間です
 	Timeout string `mapstructure:"timeout" yaml:"timeout"`
 
 	// MaxRetries は最大リトライ回数です
 	MaxRetries int `mapstructure:"max_retries" yaml:"max_retries"`
+
+	// ClaudePath は Claude CLI のパスです (deprecated: Phase 3で削除予定)
+	// 後方互換性のために残しています。GLM完全移行後に削除します。
+	ClaudePath string `mapstructure:"claude_path" yaml:"claude_path"`
 }
 
 // GetTimeout はタイムアウト設定を time.Duration として返します
@@ -78,8 +93,14 @@ func (c *LLMConfig) GetTimeout() (time.Duration, error) {
 
 // Validate は LLMConfig を検証します
 func (c *LLMConfig) Validate() error {
-	if c.ClaudePath == "" {
-		return fmt.Errorf("llm.claude_path is required")
+	if c.Provider == "" {
+		return fmt.Errorf("llm.provider is required")
+	}
+	if c.BaseURL == "" {
+		return fmt.Errorf("llm.base_url is required")
+	}
+	if c.Model == "" {
+		return fmt.Errorf("llm.model is required")
 	}
 	if c.MaxRetries < 0 {
 		return fmt.Errorf("llm.max_retries must be non-negative, got: %d", c.MaxRetries)
@@ -212,9 +233,12 @@ func (c *Config) Validate() error {
 func DefaultConfig() *Config {
 	return &Config{
 		LLM: LLMConfig{
-			ClaudePath: "claude",
+			Provider:   "glm",
+			BaseURL:    "https://open.bigmodel.cn/api/paas/v4/",
+			Model:      "glm-4-flash",
 			Timeout:    "2m",
 			MaxRetries: 3,
+			ClaudePath: "claude", // deprecated: Phase 3で削除予定
 		},
 		Output: OutputConfig{
 			Directory: ".claude/agents",
@@ -243,6 +267,15 @@ func (c *Config) Merge(other *ConfigOverrides) {
 		return
 	}
 
+	if other.LLM.Provider != nil {
+		c.LLM.Provider = *other.LLM.Provider
+	}
+	if other.LLM.BaseURL != nil {
+		c.LLM.BaseURL = *other.LLM.BaseURL
+	}
+	if other.LLM.Model != nil {
+		c.LLM.Model = *other.LLM.Model
+	}
 	if other.LLM.ClaudePath != nil {
 		c.LLM.ClaudePath = *other.LLM.ClaudePath
 	}

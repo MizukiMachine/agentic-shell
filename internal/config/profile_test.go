@@ -60,8 +60,8 @@ func TestProfileManagerLoadAndMergeOrder(t *testing.T) {
 	if merged.Generation.DefaultModel != "custom-model" {
 		t.Fatalf("expected profile setting to override base, got %q", merged.Generation.DefaultModel)
 	}
-	if merged.LLM.ClaudePath != "claude" {
-		t.Fatalf("expected base config values to be preserved, got %q", merged.LLM.ClaudePath)
+	if merged.LLM.Provider != "glm" {
+		t.Fatalf("expected base config values to be preserved, got %q", merged.LLM.Provider)
 	}
 }
 

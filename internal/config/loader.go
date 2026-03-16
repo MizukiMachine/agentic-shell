@@ -242,6 +242,9 @@ func ConfigExists() (bool, error) {
 func bindEnvKeys(v *viper.Viper) {
 	for _, key := range []string{
 		"profile",
+		"llm.provider",
+		"llm.base_url",
+		"llm.model",
 		"llm.claude_path",
 		"llm.timeout",
 		"llm.max_retries",
@@ -263,6 +266,18 @@ func bindEnvKeys(v *viper.Viper) {
 func loadOverrides(v *viper.Viper) *ConfigOverrides {
 	overrides := &ConfigOverrides{}
 
+	if v.IsSet("llm.provider") {
+		value := v.GetString("llm.provider")
+		overrides.LLM.Provider = &value
+	}
+	if v.IsSet("llm.base_url") {
+		value := v.GetString("llm.base_url")
+		overrides.LLM.BaseURL = &value
+	}
+	if v.IsSet("llm.model") {
+		value := v.GetString("llm.model")
+		overrides.LLM.Model = &value
+	}
 	if v.IsSet("llm.claude_path") {
 		value := v.GetString("llm.claude_path")
 		overrides.LLM.ClaudePath = &value
