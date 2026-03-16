@@ -1,16 +1,25 @@
 package config
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.LLM.ClaudePath != "claude" {
-		t.Fatalf("expected default Claude path, got %q", cfg.LLM.ClaudePath)
+	if cfg.LLM.Provider != "glm" {
+		t.Fatalf("expected default provider glm, got %q", cfg.LLM.Provider)
+	}
+	if cfg.LLM.BaseURL != "https://open.bigmodel.cn/api/paas/v4/" {
+		t.Fatalf("expected default base_url, got %q", cfg.LLM.BaseURL)
+	}
+	if cfg.LLM.Model != "glm-4-flash" {
+		t.Fatalf("expected default model glm-4-flash, got %q", cfg.LLM.Model)
 	}
 	if cfg.Output.Directory != ".claude/agents" {
 		t.Fatalf("expected default output directory, got %q", cfg.Output.Directory)
@@ -27,7 +36,9 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestLoaderLoadFromEnv(t *testing.T) {
-	t.Setenv("AGENTIC_LLM_CLAUDE_PATH", "/usr/local/bin/claude")
+	t.Setenv("AGENTIC_LLM_PROVIDER", "glm")
+	t.Setenv("AGENTIC_LLM_BASE_URL", "https://glm.example.test/v1/")
+	t.Setenv("AGENTIC_LLM_MODEL", "glm-4.5")
 	t.Setenv("AGENTIC_LLM_MAX_RETRIES", "0")
 	t.Setenv("AGENTIC_GATHERING_CONFIDENCE_THRESHOLD", "0")
 	t.Setenv("AGENTIC_GATHERING_USE_LLM_QUESTIONS", "true")
@@ -39,8 +50,14 @@ func TestLoaderLoadFromEnv(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if cfg.LLM.ClaudePath != "/usr/local/bin/claude" {
-		t.Fatalf("expected env override for llm.claude_path, got %q", cfg.LLM.ClaudePath)
+	if cfg.LLM.Provider != "glm" {
+		t.Fatalf("expected env override for llm.provider, got %q", cfg.LLM.Provider)
+	}
+	if cfg.LLM.BaseURL != "https://glm.example.test/v1/" {
+		t.Fatalf("expected env override for llm.base_url, got %q", cfg.LLM.BaseURL)
+	}
+	if cfg.LLM.Model != "glm-4.5" {
+		t.Fatalf("expected env override for llm.model, got %q", cfg.LLM.Model)
 	}
 	if cfg.LLM.MaxRetries != 0 {
 		t.Fatalf("expected env override for llm.max_retries=0, got %d", cfg.LLM.MaxRetries)
@@ -63,7 +80,9 @@ func TestLoaderLoadFromFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agentic.yaml")
 	content := []byte(`llm:
-  claude_path: /opt/claude
+  provider: glm
+  base_url: https://open.bigmodel.cn/api/paas/v4/custom/
+  model: glm-4-plus
 output:
   directory: ./out
   overwrite: true
@@ -95,6 +114,15 @@ generation:
 	if !cfg.Output.Overwrite {
 		t.Fatal("expected overwrite=true from file")
 	}
+	if cfg.LLM.Provider != "glm" {
+		t.Fatalf("expected llm.provider from file, got %q", cfg.LLM.Provider)
+	}
+	if cfg.LLM.BaseURL != "https://open.bigmodel.cn/api/paas/v4/custom/" {
+		t.Fatalf("expected llm.base_url from file, got %q", cfg.LLM.BaseURL)
+	}
+	if cfg.LLM.Model != "glm-4-plus" {
+		t.Fatalf("expected llm.model from file, got %q", cfg.LLM.Model)
+	}
 	if cfg.Gathering.MaxQuestionRounds != 3 {
 		t.Fatalf("expected max_question_rounds=3, got %d", cfg.Gathering.MaxQuestionRounds)
 	}
@@ -103,6 +131,34 @@ generation:
 	}
 	if cfg.Generation.DefaultModel != "claude-opus-4-1" {
 		t.Fatalf("expected default_model from file, got %q", cfg.Generation.DefaultModel)
+	}
+}
+
+func TestLoaderIgnoresDeprecatedClaudePathWithWarning(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agentic.yaml")
+	content := []byte(`llm:
+  claude_path: /opt/claude
+`)
+
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	var logBuffer bytes.Buffer
+	restore := captureLogs(t, &logBuffer)
+	defer restore()
+
+	cfg, err := NewLoader().WithConfigPath(path).Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.LLM.Provider != "glm" {
+		t.Fatalf("expected default provider to remain glm, got %q", cfg.LLM.Provider)
+	}
+	if !strings.Contains(logBuffer.String(), "llm.claude_path is deprecated and ignored") {
+		t.Fatalf("expected deprecation warning, got %q", logBuffer.String())
 	}
 }
 
@@ -125,6 +181,7 @@ func TestConfigMergePreservesZeroValues(t *testing.T) {
 
 	cfg.Merge(&ConfigOverrides{
 		LLM: LLMConfigOverrides{
+			Model:      stringPtr("glm-4-air"),
 			MaxRetries: intPtr(0),
 		},
 		Output: OutputConfigOverrides{
@@ -142,6 +199,9 @@ func TestConfigMergePreservesZeroValues(t *testing.T) {
 
 	if cfg.LLM.MaxRetries != 0 {
 		t.Fatalf("expected llm.max_retries=0, got %d", cfg.LLM.MaxRetries)
+	}
+	if cfg.LLM.Model != "glm-4-air" {
+		t.Fatalf("expected llm.model=glm-4-air, got %q", cfg.LLM.Model)
 	}
 	if !cfg.Output.Overwrite {
 		t.Fatal("expected output.overwrite=true")
@@ -170,4 +230,18 @@ func float64Ptr(v float64) *float64 {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func captureLogs(t *testing.T, dst *bytes.Buffer) func() {
+	t.Helper()
+
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(dst)
+	log.SetFlags(0)
+
+	return func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	}
 }

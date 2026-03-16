@@ -182,7 +182,9 @@ func writeE2EConfig(t *testing.T, dir string) string {
 	configPath := filepath.Join(dir, ".ags.yaml")
 	config := strings.TrimSpace(`
 llm:
-  claude_path: "claude"
+  provider: "glm"
+  base_url: "https://open.bigmodel.cn/api/paas/v4/"
+  model: "glm-4-flash"
   timeout: "2m"
   max_retries: 3
 output:
