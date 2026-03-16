@@ -4,7 +4,6 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -81,6 +80,10 @@ type LLMConfig struct {
 
 	// MaxRetries は最大リトライ回数です
 	MaxRetries int `mapstructure:"max_retries" yaml:"max_retries"`
+
+	// ClaudePath は Claude CLI のパスです (deprecated: Phase 3で削除予定)
+	// 後方互換性のために残しています。GLM完全移行後に削除します。
+	ClaudePath string `mapstructure:"claude_path" yaml:"claude_path"`
 }
 
 // GetTimeout はタイムアウト設定を time.Duration として返します
@@ -235,6 +238,7 @@ func DefaultConfig() *Config {
 			Model:      "glm-4-flash",
 			Timeout:    "2m",
 			MaxRetries: 3,
+			ClaudePath: "claude", // deprecated: Phase 3で削除予定
 		},
 		Output: OutputConfig{
 			Directory: ".claude/agents",
@@ -273,7 +277,7 @@ func (c *Config) Merge(other *ConfigOverrides) {
 		c.LLM.Model = *other.LLM.Model
 	}
 	if other.LLM.ClaudePath != nil {
-		log.Printf("warning: llm.claude_path is deprecated and ignored")
+		c.LLM.ClaudePath = *other.LLM.ClaudePath
 	}
 	if other.LLM.Timeout != nil {
 		c.LLM.Timeout = *other.LLM.Timeout

@@ -1,11 +1,8 @@
 package config
 
 import (
-	"bytes"
-	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -134,7 +131,7 @@ generation:
 	}
 }
 
-func TestLoaderIgnoresDeprecatedClaudePathWithWarning(t *testing.T) {
+func TestLoaderLoadsDeprecatedClaudePathForBackwardCompatibility(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agentic.yaml")
 	content := []byte(`llm:
@@ -145,20 +142,18 @@ func TestLoaderIgnoresDeprecatedClaudePathWithWarning(t *testing.T) {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
-	var logBuffer bytes.Buffer
-	restore := captureLogs(t, &logBuffer)
-	defer restore()
-
 	cfg, err := NewLoader().WithConfigPath(path).Load()
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
+	// 後方互換性: claude_pathが読み込まれること
+	if cfg.LLM.ClaudePath != "/opt/claude" {
+		t.Fatalf("expected claude_path /opt/claude, got %q", cfg.LLM.ClaudePath)
+	}
+	// デフォルト値も設定されること
 	if cfg.LLM.Provider != "glm" {
 		t.Fatalf("expected default provider to remain glm, got %q", cfg.LLM.Provider)
-	}
-	if !strings.Contains(logBuffer.String(), "llm.claude_path is deprecated and ignored") {
-		t.Fatalf("expected deprecation warning, got %q", logBuffer.String())
 	}
 }
 
@@ -230,18 +225,4 @@ func float64Ptr(v float64) *float64 {
 
 func boolPtr(v bool) *bool {
 	return &v
-}
-
-func captureLogs(t *testing.T, dst *bytes.Buffer) func() {
-	t.Helper()
-
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(dst)
-	log.SetFlags(0)
-
-	return func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	}
 }

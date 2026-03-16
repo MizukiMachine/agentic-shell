@@ -121,8 +121,11 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	gatherer.SetUseLLMQuestions(useLLMQuestions)
 
 	if useLLMQuestions {
-		// Claude CLI のパスを決定（優先順位: CLI フラグ > デフォルト値 > 対話で確認）
-		claudePath := "claude"
+		// Claude CLI のパスを決定（優先順位: CLI フラグ > 設定ファイル > デフォルト値 > 対話で確認）
+		claudePath := cfg.LLM.ClaudePath
+		if claudePath == "" {
+			claudePath = "claude"
+		}
 		if cmd.Flags().Changed("claude-path") && specClaudePath != "" {
 			claudePath = specClaudePath
 		} else {
