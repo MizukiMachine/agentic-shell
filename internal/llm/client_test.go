@@ -3,6 +3,11 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -133,6 +138,244 @@ func TestSetTimeout(t *testing.T) {
 	if client.GetTimeout() != newTimeout {
 		t.Errorf("GetTimeout() = %v, want %v", client.GetTimeout(), newTimeout)
 	}
+}
+
+func TestGLMClientExecute(t *testing.T) {
+	client := newTestGLMClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %s, want /chat/completions", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-api-key" {
+			t.Fatalf("Authorization = %q, want Bearer test-api-key", got)
+		}
+
+		var req glmChatCompletionRequest
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("Unmarshal() error = %v", err)
+		}
+		if req.Model != "glm-test-model" {
+			t.Fatalf("model = %q, want glm-test-model", req.Model)
+		}
+		if len(req.Messages) != 1 || req.Messages[0].Content != "hello glm" {
+			t.Fatalf("messages = %#v, want prompt hello glm", req.Messages)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": "hello from glm",
+					},
+				},
+			},
+		})
+	}), WithModel("glm-test-model"), WithMaxRetries(0))
+
+	result, err := client.Execute(context.Background(), "hello glm")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result != "hello from glm" {
+		t.Fatalf("Execute() = %q, want hello from glm", result)
+	}
+}
+
+func TestGLMClientExecuteJSON(t *testing.T) {
+	client := newTestGLMClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req glmChatCompletionRequest
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("Unmarshal() error = %v", err)
+		}
+		if !strings.Contains(req.Messages[0].Content, "有効なJSON形式") {
+			t.Fatalf("prompt = %q, want JSON instruction", req.Messages[0].Content)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": "```json\n{\"name\":\"glm\",\"enabled\":true}\n```",
+					},
+				},
+			},
+		})
+	}), WithMaxRetries(0))
+
+	var target struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+
+	if err := client.ExecuteJSON(context.Background(), "json please", &target); err != nil {
+		t.Fatalf("ExecuteJSON() error = %v", err)
+	}
+	if target.Name != "glm" || !target.Enabled {
+		t.Fatalf("target = %+v, want decoded JSON", target)
+	}
+}
+
+func TestGLMClientTimeout(t *testing.T) {
+	client := newTestGLMClientWithTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		select {
+		case <-time.After(150 * time.Millisecond):
+			recorder := httptest.NewRecorder()
+			recorder.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(recorder).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{
+						"message": map[string]string{
+							"role":    "assistant",
+							"content": "late response",
+						},
+					},
+				},
+			})
+			return recorder.Result(), nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}), WithMaxRetries(0))
+	client.SetTimeout(50 * time.Millisecond)
+
+	if client.GetTimeout() != 50*time.Millisecond {
+		t.Fatalf("GetTimeout() = %v, want 50ms", client.GetTimeout())
+	}
+	if client.httpClient.Timeout != 50*time.Millisecond {
+		t.Fatalf("httpClient.Timeout = %v, want 50ms", client.httpClient.Timeout)
+	}
+
+	_, err := client.Execute(context.Background(), "slow request")
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("error = %v, want timeout message", err)
+	}
+}
+
+func TestGLMClientRetry(t *testing.T) {
+	var attempts int32
+
+	client := newTestGLMClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := atomic.AddInt32(&attempts, 1)
+		if current < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]string{"message": "temporary failure"},
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]string{
+						"role":    "assistant",
+						"content": "recovered",
+					},
+				},
+			},
+		})
+	}), WithMaxRetries(2))
+
+	result, err := client.Execute(context.Background(), "retry request")
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result != "recovered" {
+		t.Fatalf("Execute() = %q, want recovered", result)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+func TestGLMClientMissingAPIKey(t *testing.T) {
+	t.Setenv(glmAPIKeyEnv, "")
+
+	client, err := NewGLMClient()
+	if err == nil {
+		t.Fatalf("expected error, got client %#v", client)
+	}
+	if !strings.Contains(err.Error(), glmAPIKeyEnv) {
+		t.Fatalf("error = %v, want reference to %s", err, glmAPIKeyEnv)
+	}
+}
+
+func TestGLMClientAPIError(t *testing.T) {
+	var attempts int32
+
+	client := newTestGLMClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]string{"message": "invalid request"},
+		})
+	}))
+
+	_, err := client.Execute(context.Background(), "bad request")
+	if err == nil {
+		t.Fatal("expected API error, got nil")
+	}
+	if !strings.Contains(err.Error(), "status 400") || !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("error = %v, want status 400 and invalid request", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Fatalf("attempts = %d, want 1", got)
+	}
+}
+
+func newTestGLMClient(t *testing.T, handler http.Handler, opts ...ClientOption) *GLMClient {
+	t.Helper()
+
+	return newTestGLMClientWithTransport(t, handlerRoundTripper{handler: handler}, opts...)
+}
+
+func newTestGLMClientWithTransport(t *testing.T, transport http.RoundTripper, opts ...ClientOption) *GLMClient {
+	t.Helper()
+
+	t.Setenv(glmAPIKeyEnv, "test-api-key")
+
+	allOpts := append([]ClientOption{WithBaseURL("https://glm.example.test")}, opts...)
+	client, err := NewGLMClient(allOpts...)
+	if err != nil {
+		t.Fatalf("NewGLMClient() error = %v", err)
+	}
+	client.httpClient.Transport = transport
+
+	return client
+}
+
+type handlerRoundTripper struct {
+	handler http.Handler
+}
+
+func (rt handlerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	recorder := httptest.NewRecorder()
+	rt.handler.ServeHTTP(recorder, req)
+	return recorder.Result(), nil
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // TestExtractJSON tests JSON extraction from various formats
