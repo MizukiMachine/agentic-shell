@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,87 +57,65 @@ func (m *MockClient) GetTimeout() time.Duration {
 // Compile-time interface check for MockClient
 var _ LLMClient = (*MockClient)(nil)
 
-// TestNewClaudeClient tests ClaudeClient creation
-func TestNewClaudeClient(t *testing.T) {
-	tests := []struct {
-		name     string
-		opts     []ClientOption
-		expected struct {
-			timeout time.Duration
-			cliPath string
-		}
-	}{
-		{
-			name: "default options",
-			opts: nil,
-			expected: struct {
-				timeout time.Duration
-				cliPath string
-			}{
-				timeout: 5 * time.Minute,
-				cliPath: "claude",
-			},
-		},
-		{
-			name: "with custom timeout",
-			opts: []ClientOption{WithTimeout(10 * time.Minute)},
-			expected: struct {
-				timeout time.Duration
-				cliPath string
-			}{
-				timeout: 10 * time.Minute,
-				cliPath: "claude",
-			},
-		},
-		{
-			name: "with custom cli path",
-			opts: []ClientOption{WithCLIPath("/usr/local/bin/claude")},
-			expected: struct {
-				timeout time.Duration
-				cliPath string
-			}{
-				timeout: 5 * time.Minute,
-				cliPath: "/usr/local/bin/claude",
-			},
-		},
-		{
-			name: "with multiple options",
-			opts: []ClientOption{
-				WithTimeout(15 * time.Minute),
-				WithCLIPath("/custom/claude"),
-				WithCLIArgs("--dangerously-skip-permissions"),
-			},
-			expected: struct {
-				timeout time.Duration
-				cliPath string
-			}{
-				timeout: 15 * time.Minute,
-				cliPath: "/custom/claude",
-			},
-		},
-	}
+// TestNewLLMClient tests LLM client factory function
+func TestNewLLMClient(t *testing.T) {
+	t.Run("missing api key", func(t *testing.T) {
+		t.Setenv(glmAPIKeyEnv, "")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := NewClaudeClient(tt.opts...)
-			if client.GetTimeout() != tt.expected.timeout {
-				t.Errorf("timeout = %v, want %v", client.GetTimeout(), tt.expected.timeout)
-			}
-			if client.cliPath != tt.expected.cliPath {
-				t.Errorf("cliPath = %v, want %v", client.cliPath, tt.expected.cliPath)
-			}
-		})
-	}
+		cfg := &GLMConfig{
+			BaseURL:    "https://test.example.com",
+			Model:      "test-model",
+			Timeout:    time.Minute,
+			MaxRetries: 3,
+		}
+
+		_, err := NewLLMClient(cfg)
+		if err == nil {
+			t.Fatal("expected error for missing API key")
+		}
+
+		var apiKeyErr *APIKeyError
+		if !strings.Contains(err.Error(), glmAPIKeyEnv) {
+			t.Fatalf("error = %v, want reference to %s", err, glmAPIKeyEnv)
+		}
+		// Check it's an APIKeyError
+		if !errors.As(err, &apiKeyErr) {
+			t.Fatalf("error = %v, want APIKeyError", err)
+		}
+	})
+
+	t.Run("with valid config", func(t *testing.T) {
+		t.Setenv(glmAPIKeyEnv, "test-key")
+
+		cfg := &GLMConfig{
+			BaseURL:    "https://test.example.com",
+			Model:      "test-model",
+			Timeout:    time.Minute,
+			MaxRetries: 3,
+		}
+
+		client, err := NewLLMClient(cfg)
+		if err != nil {
+			t.Fatalf("NewLLMClient() error = %v", err)
+		}
+
+		// Verify it implements LLMClient interface
+		var _ LLMClient = client
+	})
 }
 
-// TestSetTimeout tests SetTimeout method
-func TestSetTimeout(t *testing.T) {
-	client := NewClaudeClient()
-	newTimeout := 3 * time.Minute
-	client.SetTimeout(newTimeout)
+// TestAPIKeyError tests APIKeyError error message
+func TestAPIKeyError(t *testing.T) {
+	err := &APIKeyError{}
 
-	if client.GetTimeout() != newTimeout {
-		t.Errorf("GetTimeout() = %v, want %v", client.GetTimeout(), newTimeout)
+	if !strings.Contains(err.Error(), glmAPIKeyEnv) {
+		t.Errorf("error message should contain %s", glmAPIKeyEnv)
+	}
+	if !strings.Contains(err.Error(), "export GLM_API_KEY") {
+		t.Error("error message should contain export instruction")
+	}
+	if !strings.Contains(err.Error(), "https://open.bigmodel.cn/") {
+		t.Error("error message should contain API key URL")
 	}
 }
 
@@ -534,8 +513,14 @@ func TestMockClient(t *testing.T) {
 
 // TestClientInterface verifies the interface implementation
 func TestClientInterface(t *testing.T) {
-	// This test ensures both ClaudeClient and MockClient implement the LLMClient interface.
-	var _ LLMClient = NewClaudeClient()
+	// This test ensures GLMClient and MockClient implement the LLMClient interface.
+	t.Setenv(glmAPIKeyEnv, "test-key")
+
+	glclient, err := NewGLMClient()
+	if err != nil {
+		t.Fatalf("NewGLMClient() error = %v", err)
+	}
+	var _ LLMClient = glclient
 	var _ LLMClient = NewMockClient()
 }
 
@@ -579,9 +564,10 @@ func BenchmarkExtractJSON(b *testing.B) {
 	}
 }
 
-// BenchmarkExecute benchmarks the Execute method (without actual CLI call)
-func BenchmarkNewClaudeClient(b *testing.B) {
+// BenchmarkNewGLMClient benchmarks the GLMClient creation
+func BenchmarkNewGLMClient(b *testing.B) {
+	b.Setenv(glmAPIKeyEnv, "test-key")
 	for i := 0; i < b.N; i++ {
-		_ = NewClaudeClient(WithTimeout(5 * time.Minute))
+		_, _ = NewGLMClient(WithTimeout(5 * time.Minute))
 	}
 }

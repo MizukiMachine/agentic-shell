@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/MizukiMachine/agentic-shell/internal/llm"
@@ -24,7 +23,7 @@ var (
 	specInputTimeout int
 	specFormat       string
 	specNoLLM        bool
-	specClaudePath   string
+	specLLMModel     string
 )
 
 // specGatherCmd はインタラクティブにAgentSpecを収集するコマンドです
@@ -62,7 +61,7 @@ func init() {
 	specGatherCmd.Flags().IntVar(&specInputTimeout, "input-timeout", 0, "入力待ちタイムアウト（秒）、0=設定値使用")
 	specGatherCmd.Flags().StringVarP(&specFormat, "format", "f", "yaml", "出力形式 (yaml または json)")
 	specGatherCmd.Flags().BoolVar(&specNoLLM, "no-llm", false, "従来の固定質問モードを使用（LLM動的生成を無効化）")
-	specGatherCmd.Flags().StringVar(&specClaudePath, "claude-path", "", "Claude CLI のパス (指定しない場合はデフォルト値または対話で確認)")
+	specGatherCmd.Flags().StringVar(&specLLMModel, "llm-model", "", "LLMモデル名を上書き（指定しない場合は設定値使用）")
 }
 
 // runSpecGather はspec-gatherコマンドのメイン処理です
@@ -121,38 +120,34 @@ func runSpecGather(cmd *cobra.Command, args []string) error {
 	gatherer.SetUseLLMQuestions(useLLMQuestions)
 
 	if useLLMQuestions {
-		// Claude CLI のパスを決定（優先順位: CLI フラグ > 設定ファイル > デフォルト値 > 対話で確認）
-		claudePath := cfg.LLM.ClaudePath
-		if claudePath == "" {
-			claudePath = "claude"
-		}
-		if cmd.Flags().Changed("claude-path") && specClaudePath != "" {
-			claudePath = specClaudePath
-		} else {
-			// 対話的に確認（空入力はデフォルト値を使用）
-			fmt.Fprintf(os.Stderr, "Claude CLI のパスを入力してください [デフォルト: %s]: ", claudePath)
-			userPath, err := inputReader.ReadString('\n')
-			if err != nil && len(userPath) == 0 {
-				return fmt.Errorf("Claude CLIパス取得エラー: %w", err)
-			}
-			userPath = strings.TrimSpace(userPath)
-			if userPath != "" {
-				claudePath = userPath
-			}
-		}
-
+		// GLM API クライアントを作成
 		llmTimeout, err := cfg.LLM.GetTimeout()
 		if err != nil {
 			return fmt.Errorf("LLMタイムアウト設定エラー: %w", err)
 		}
-		client := llm.NewClaudeClient(
-			llm.WithCLIPath(claudePath),
-			llm.WithTimeout(llmTimeout),
-		)
+
+		// モデル名を決定（優先順位: CLI フラグ > 設定ファイル）
+		model := cfg.LLM.Model
+		if cmd.Flags().Changed("llm-model") && specLLMModel != "" {
+			model = specLLMModel
+		}
+
+		llmCfg := &llm.GLMConfig{
+			BaseURL:    cfg.LLM.BaseURL,
+			Model:      model,
+			Timeout:    llmTimeout,
+			MaxRetries: cfg.LLM.MaxRetries,
+		}
+
+		client, err := llm.NewLLMClient(llmCfg)
+		if err != nil {
+			return fmt.Errorf("LLMクライアント初期化エラー: %w", err)
+		}
 		gatherer.SetLLMClient(client)
 
 		if verbose {
-			fmt.Fprintf(os.Stderr, "Claude CLI パス: %s\n", claudePath)
+			fmt.Fprintf(os.Stderr, "LLMモデル: %s\n", model)
+			fmt.Fprintf(os.Stderr, "LLMベースURL: %s\n", cfg.LLM.BaseURL)
 		}
 	}
 
